@@ -3,21 +3,13 @@ import os
 import re
 from pathlib import Path
 
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 
-# ---------------------------------------------------------
-# Settings
-# ---------------------------------------------------------
-
-SOURCE_URL = (
-    "https://www.brickeconomy.com/minifigs/retiring-soon"
-)
-
-READER_URL = (
-    "https://r.jina.ai/"
-    "https://www.brickeconomy.com/minifigs/retiring-soon"
-)
+URL = "https://www.brickeconomy.com/minifigs/retiring-soon"
 
 STATE_FILE = Path("brickeconomy_state.json")
 
@@ -29,149 +21,193 @@ DISCORD_WEBHOOK = os.environ[
 
 
 # ---------------------------------------------------------
-# Download page through Jina Reader
+# Start real Chrome browser
 # ---------------------------------------------------------
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0 Safari/537.36"
-    ),
-    "X-Engine": "browser",
-    "X-Respond-With": "markdown",
-    "X-Timeout": "30",
-}
+options = Options()
 
-
-response = requests.get(
-    READER_URL,
-    headers=HEADERS,
-    timeout=90,
+options.add_argument("--headless=new")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-gpu")
+options.add_argument("--window-size=1920,1080")
+options.add_argument(
+    "--disable-blink-features=AutomationControlled"
 )
 
-response.raise_for_status()
-
-page_text = response.text
-
-
-print(
-    f"Downloaded BrickEconomy page: "
-    f"{len(page_text):,} characters"
+options.add_argument(
+    "--user-agent=Mozilla/5.0 "
+    "(Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 "
+    "(KHTML, like Gecko) "
+    "Chrome/153.0.0.0 Safari/537.36"
 )
 
 
-# ---------------------------------------------------------
-# Parse minifig links
-# ---------------------------------------------------------
-
-current = {}
-
-
-link_pattern = re.compile(
-    r'\[([^\]]+)\]'
-    r'\((https?://www\.brickeconomy\.com/minifig/[^)\s]+)\)'
+driver = webdriver.Chrome(
+    options=options
 )
 
 
-for match in link_pattern.finditer(page_text):
+try:
 
-    label = match.group(1).strip()
-    url = match.group(2).strip()
-
-
-    # Extract minifig code from URL.
-    code_match = re.search(
-        r"/minifig/([^/)\s]+)",
-        url
+    # Hide the webdriver flag.
+    driver.execute_script(
+        """
+        Object.defineProperty(
+            navigator,
+            'webdriver',
+            {
+                get: () => undefined
+            }
+        );
+        """
     )
 
-    if not code_match:
-        continue
+    driver.get(URL)
 
 
-    code = code_match.group(1).strip()
-
-
-    # We only want entries with a current value.
-    if "Value" not in label:
-        continue
-
-
-    # BrickEconomy may return different currencies depending
-    # on the page/session. We support the common symbols.
-    price_match = re.search(
-        r"Value\s*([€$£])\s*([\d,.]+)",
-        label
+    # Wait until minifig links are present.
+    WebDriverWait(
+        driver,
+        30
+    ).until(
+        lambda d: len(
+            d.find_elements(
+                By.CSS_SELECTOR,
+                "a[href*='/minifig/']"
+            )
+        ) > 20
     )
 
-    if not price_match:
-        continue
+
+    links = driver.find_elements(
+        By.CSS_SELECTOR,
+        "a[href*='/minifig/']"
+    )
 
 
-    currency = price_match.group(1)
-    price_text = price_match.group(2)
+    print(
+        f"Found {len(links)} minifig links."
+    )
 
 
-    try:
+    # -----------------------------------------------------
+    # Parse current list
+    # -----------------------------------------------------
 
-        price = float(
-            price_text.replace(",", "")
+    current = {}
+
+
+    for link in links:
+
+        href = link.get_attribute(
+            "href"
         )
 
-    except ValueError:
-
-        continue
+        text = link.text.strip()
 
 
-    # Remove "Value €XX.XX" / "$XX.XX" / "£XX.XX".
-    name = re.sub(
-        r"\s+Value\s*[€$£]\s*[\d,.]+\s*$",
-        "",
-        label
-    ).strip()
+        if not href:
+            continue
 
 
-    # Remove minifig code from the start.
-    if name.startswith(code):
-
-        name = name[len(code):].strip()
-
-
-    if not name:
-        name = code
+        code_match = re.search(
+            r"/minifig/([^/?#]+)",
+            href
+        )
 
 
-    current[code] = {
-        "name": name,
-        "price": price,
-        "currency": currency,
-    }
+        if not code_match:
+            continue
+
+
+        code = code_match.group(1).strip()
+
+
+        # We only care about entries that have a value.
+        if "Value" not in text:
+            continue
+
+
+        price_match = re.search(
+            r"Value\s*([€$£])\s*([\d.,]+)",
+            text
+        )
+
+
+        if not price_match:
+            continue
+
+
+        currency = price_match.group(1)
+
+        price_text = price_match.group(2)
+
+
+        try:
+
+            price = float(
+                price_text.replace(",", "")
+            )
+
+        except ValueError:
+
+            continue
+
+
+        name = text
+
+
+        # Remove the trailing Value section.
+        name = re.sub(
+            r"\s+Value\s*[€$£]\s*[\d.,]+\s*$",
+            "",
+            name
+        ).strip()
+
+
+        # Some labels begin with the minifig code.
+        if name.startswith(code):
+
+            name = name[
+                len(code):
+            ].strip()
+
+
+        if not name:
+
+            name = code
+
+
+        current[code] = {
+            "name": name,
+            "price": price,
+            "currency": currency,
+        }
+
+
+finally:
+
+    driver.quit()
 
 
 # ---------------------------------------------------------
 # Safety check
 # ---------------------------------------------------------
-# Never overwrite the previous state when the page could
-# not be parsed correctly.
 
 if len(current) == 0:
 
-    preview = page_text[:1000].replace(
-        "\n",
-        " "
-    )
-
     raise RuntimeError(
-        "BrickEconomy page was downloaded, but "
-        "0 minifigs could be parsed. "
-        "State was NOT changed. "
-        f"Preview: {preview}"
+        "Chrome loaded BrickEconomy but "
+        "no minifigs could be parsed. "
+        "State was NOT changed."
     )
 
 
 print(
-    f"Parsed {len(current):,} Retiring Soon minifigs."
+    f"Parsed {len(current):,} "
+    f"Retiring Soon minifigs."
 )
 
 
@@ -199,7 +235,7 @@ previous_items = previous.get(
 
 
 # ---------------------------------------------------------
-# FIRST RUN = baseline only
+# First successful scan
 # ---------------------------------------------------------
 
 if not previous_items:
@@ -207,8 +243,8 @@ if not previous_items:
     STATE_FILE.write_text(
         json.dumps(
             {
-                "source": SOURCE_URL,
-                "items": current
+                "source": URL,
+                "items": current,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -218,7 +254,7 @@ if not previous_items:
 
 
     print(
-        "First successful scan completed."
+        "First successful scan."
     )
 
     print(
@@ -233,7 +269,7 @@ if not previous_items:
 
 
 # ---------------------------------------------------------
-# Compare list
+# Detect added / removed
 # ---------------------------------------------------------
 
 current_codes = set(
@@ -255,7 +291,7 @@ removed = sorted(
 
 
 # ---------------------------------------------------------
-# Compare prices
+# Detect price changes
 # ---------------------------------------------------------
 
 price_changes = []
@@ -265,16 +301,17 @@ for code in (
     current_codes & previous_codes
 ):
 
-    old_data = previous_items[code]
+    old_price = previous_items[
+        code
+    ].get("price")
 
-    old_price = old_data.get(
-        "price"
-    )
-
-    new_price = current[code]["price"]
+    new_price = current[
+        code
+    ]["price"]
 
 
     if not old_price or old_price <= 0:
+
         continue
 
 
@@ -298,29 +335,29 @@ for code in (
         )
 
 
-# Biggest increases first.
+# Largest rises.
 gainers = sorted(
     [
-        item
-        for item in price_changes
-        if item[0] >= THRESHOLD
+        x
+        for x in price_changes
+        if x[0] >= THRESHOLD
     ],
     reverse=True,
 )[:15]
 
 
-# Biggest decreases first.
+# Largest falls.
 losers = sorted(
     [
-        item
-        for item in price_changes
-        if item[0] <= -THRESHOLD
+        x
+        for x in price_changes
+        if x[0] <= -THRESHOLD
     ]
 )[:15]
 
 
 # ---------------------------------------------------------
-# Save helper
+# Save state helper
 # ---------------------------------------------------------
 
 def save_state():
@@ -328,8 +365,8 @@ def save_state():
     STATE_FILE.write_text(
         json.dumps(
             {
-                "source": SOURCE_URL,
-                "items": current
+                "source": URL,
+                "items": current,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -339,7 +376,7 @@ def save_state():
 
 
 # ---------------------------------------------------------
-# Nothing changed = no Discord message
+# No changes = no Discord
 # ---------------------------------------------------------
 
 if (
@@ -377,7 +414,7 @@ def money(
 
 
 # ---------------------------------------------------------
-# Build Discord message
+# Discord message
 # ---------------------------------------------------------
 
 message = [
@@ -512,7 +549,7 @@ if losers:
 
 
 # ---------------------------------------------------------
-# Send Discord notification
+# Send Discord
 # ---------------------------------------------------------
 
 discord_response = requests.post(
@@ -531,7 +568,7 @@ discord_response.raise_for_status()
 
 
 # ---------------------------------------------------------
-# Save today's state
+# Save state
 # ---------------------------------------------------------
 
 save_state()
