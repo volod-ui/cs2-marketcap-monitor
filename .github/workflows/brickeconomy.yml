@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
 
@@ -24,7 +24,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4
+          pip install requests selenium
 
       - name: Run BrickEconomy monitor
         env:
