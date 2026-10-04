@@ -10,12 +10,13 @@ import requests
 API_URL = "https://api.pricempire.com/v4/free/items/prices"
 STATE_FILE = Path("state.json")
 
-THRESHOLD = 7.5
+THRESHOLD_MIN = 7.5
+THRESHOLD_MAX = 50.0
 STRONG_THRESHOLD = 15.0
 
 APP_ID = 730
-CURRENCY = "USD"   # FREE tier only supports USD
-SOURCE = "steam"   # FREE tier only supports steam
+CURRENCY = "USD"   # Free tier ondersteunt enkel USD
+SOURCE = "steam"   # Free tier ondersteunt enkel Steam
 
 API_KEY = os.environ["PRICEMPIRE_API_KEY"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
@@ -122,7 +123,8 @@ for name, new_price in current_prices.items():
 
     change = ((new_price - old_price) / old_price) * 100
 
-    if abs(change) >= THRESHOLD:
+    # Alleen alerts tussen 7.5% en 50%
+    if THRESHOLD_MIN <= abs(change) <= THRESHOLD_MAX:
         movers.append({
             "name": name,
             "old": old_price,
@@ -136,13 +138,13 @@ for name, new_price in current_prices.items():
 # ============================================================
 
 gainers = sorted(
-    [m for m in movers if m["change"] >= THRESHOLD],
+    [m for m in movers if m["change"] >= THRESHOLD_MIN],
     key=lambda m: m["change"],
     reverse=True
 )[:10]
 
 losers = sorted(
-    [m for m in movers if m["change"] <= -THRESHOLD],
+    [m for m in movers if m["change"] <= -THRESHOLD_MIN],
     key=lambda m: m["change"]
 )[:10]
 
@@ -158,7 +160,7 @@ def usd(value):
 def icon(change):
     if change >= STRONG_THRESHOLD:
         return "🔥"
-    if change >= THRESHOLD:
+    if change >= THRESHOLD_MIN:
         return "🟢"
     if change <= -STRONG_THRESHOLD:
         return "🚨"
@@ -173,13 +175,13 @@ msg = []
 msg.append("📊 **CS2 STEAM MARKET — FREE TIER SCAN**")
 msg.append("")
 msg.append(f"**Items scanned:** {len(current_prices):,}")
-msg.append(f"**Alert:** ±{THRESHOLD:.1f}%")
+msg.append(f"**Alert range:** ±{THRESHOLD_MIN:.1f}% → ±{THRESHOLD_MAX:.1f}%")
 msg.append(f"**Strong:** ±{STRONG_THRESHOLD:.0f}%")
 msg.append("**Source:** Steam (FREE tier)")
 
 if gainers:
     msg.append("")
-    msg.append(f"🚀 **GAINERS ≥ +{THRESHOLD:.1f}%**")
+    msg.append(f"🚀 **GAINERS ≥ +{THRESHOLD_MIN:.1f}%**")
     for m in gainers:
         msg.append(
             f"{icon(m['change'])} **{m['name']}** "
@@ -189,7 +191,7 @@ if gainers:
 
 if losers:
     msg.append("")
-    msg.append(f"🔻 **LOSERS ≤ -{THRESHOLD:.1f}%**")
+    msg.append(f"🔻 **LOSERS ≤ -{THRESHOLD_MIN:.1f}%**")
     for m in losers:
         msg.append(
             f"{icon(m['change'])} **{m['name']}** "
