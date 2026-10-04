@@ -1,6 +1,6 @@
 import json
 import os
-import time
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,248 +12,93 @@ import requests
 # CONFIGURATION
 # =========================================================
 
-CMC_BASE = "https://pro-api.coinmarketcap.com/public-api"
-
-PRICE_URL = CMC_BASE + "/v2/simple/price"
-
-MARKETCAP_URL = (
-    CMC_BASE
-    + "/v1/global-metrics/quotes/latest"
+NEWS_URL = (
+    "https://api.steampowered.com/"
+    "ISteamNews/GetNewsForApp/v2/"
 )
 
-COINS_FILE = Path("crypto_coins.json")
-WATCHLIST_FILE = Path("crypto_watchlist.json")
-STATE_FILE = Path("crypto_state.json")
+APP_ID = 730
+
+STATE_FILE = Path(
+    "csnews_state.json"
+)
 
 DISCORD_WEBHOOK = os.environ[
-    "DISCORD_WEBHOOK_CRYPTO"
+    "DISCORD_WEBHOOK_CSNEWS"
 ]
-
-EVENT_NAME = os.environ.get(
-    "GITHUB_EVENT_NAME",
-    "schedule"
-)
-
-TEST_MODE = (
-    EVENT_NAME == "workflow_dispatch"
-    and os.environ.get(
-        "CRYPTO_TEST_MODE",
-        "false"
-    ).lower() == "true"
-)
 
 BRUSSELS = ZoneInfo(
     "Europe/Brussels"
 )
 
-THRESHOLD = 5.0
-
-STRONG_THRESHOLD = 10.0
-
 
 # =========================================================
-# SPECIAL CMC LOOKUPS
-# =========================================================
-#
-# Symbols are not always unique on CMC.
-# These coins are therefore pinned by CMC slug.
-#
-# BABY  = Babylon
-# W     = Wormhole
-# WLFI  = World Liberty Financial
-# POL   = Polygon Ecosystem Token
-# ATH   = Aethir
-# DOG   = Dog (Bitcoin / Runes)
-#
+# HELPERS
 # =========================================================
 
-SPECIAL_SLUGS = {
-    "BABY": "babylon",
-    "W": "wormhole",
-    "WLFI": "world-liberty-financial-wlfi",
-    "POL": "polygon-ecosystem-token",
-    "ATH": "aethir",
-    "DOG": "dog-go-to-the-moon-rune",
-}
+def load_state():
+    if not STATE_FILE.exists():
+        return {}
 
-
-# =========================================================
-# API HELPERS
-# =========================================================
-
-def get_json(
-    url,
-    params,
-    tries=5,
-):
-    last_error = None
-
-    for attempt in range(tries):
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                headers={
-                    "Accept": "application/json"
-                },
-                timeout=30,
-            )
-
-            if (
-                response.status_code == 429
-                and attempt < tries - 1
-            ):
-                wait = 2 ** attempt
-
-                print(
-                    "CMC rate limited us. "
-                    f"Waiting {wait}s..."
-                )
-
-                time.sleep(wait)
-                continue
-
-            response.raise_for_status()
-
-            payload = response.json()
-
-            status = payload.get(
-                "status",
-                {}
-            )
-
-            error_code = str(
-                status.get(
-                    "error_code",
-                    "0"
-                )
-            )
-
-            if error_code != "0":
-                raise RuntimeError(
-                    f"CMC error {error_code}: "
-                    f"{status.get('error_message')}"
-                )
-
-            return payload
-
-        except Exception as exc:
-            last_error = exc
-
-            if attempt < tries - 1:
-                wait = 2 ** attempt
-
-                print(
-                    f"Request failed: {exc}"
-                )
-
-                print(
-                    f"Retrying in {wait}s..."
-                )
-
-                time.sleep(wait)
-
-    raise last_error
-
-
-# =========================================================
-# FILE HELPERS
-# =========================================================
-
-def load_json(
-    path,
-    default,
-):
-    if not path.exists():
-        return default
-
-    with path.open(
+    with STATE_FILE.open(
         "r",
         encoding="utf-8"
     ) as file:
         return json.load(file)
 
 
-def save_json(
-    path,
-    data,
+def save_state(
+    state,
 ):
-    with path.open(
+    with STATE_FILE.open(
         "w",
         encoding="utf-8"
     ) as file:
         json.dump(
-            data,
+            state,
             file,
             ensure_ascii=False,
             indent=2,
         )
 
 
-# =========================================================
-# FORMATTING
-# =========================================================
-
-def format_money(
-    value,
+def clean_steam_text(
+    text,
 ):
-    if value >= 1_000_000_000_000:
-        return (
-            f"€{value / 1_000_000_000_000:.2f}T"
-        )
+    if not text:
+        return ""
 
-    if value >= 1_000_000_000:
-        return (
-            f"€{value / 1_000_000_000:.2f}B"
-        )
+    # Remove Steam BBCode tags.
+    text = re.sub(
+        r"\[/?[^\]]+\]",
+        "",
+        text,
+    )
 
-    if value >= 1_000_000:
-        return (
-            f"€{value / 1_000_000:.2f}M"
-        )
+    # Convert common HTML entities.
+    text = (
+        text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+    )
 
-    if value >= 1_000:
-        return (
-            f"€{value / 1_000:.2f}K"
-        )
+    # Normalize whitespace.
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text,
+    )
 
-    return f"€{value:,.2f}"
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
 
+    return text.strip()
 
-def format_price(
-    value,
-):
-    if value >= 1000:
-        return f"€{value:,.0f}"
-
-    if value >= 1:
-        return f"€{value:,.2f}"
-
-    if value >= 0.01:
-        return f"€{value:,.4f}"
-
-    if value >= 0.0001:
-        return f"€{value:,.6f}"
-
-    return f"€{value:.8f}"
-
-
-def percent_change(
-    old,
-    new,
-):
-    if old is None or old <= 0:
-        return None
-
-    return (
-        (new - old)
-        / old
-    ) * 100
-
-
-# =========================================================
-# DISCORD
-# =========================================================
 
 def send_discord(
     content,
@@ -273,880 +118,276 @@ def send_discord(
 
 
 def send_chunks(
-    lines,
+    content,
 ):
-    text = "\n".join(lines)
+    max_length = 1900
 
-    chunks = []
+    while len(content) > max_length:
 
-    while len(text) > 1900:
-
-        split_at = text.rfind(
+        split_at = content.rfind(
             "\n",
             0,
-            1900
+            max_length,
         )
 
         if split_at < 500:
-            split_at = 1900
+            split_at = max_length
 
-        chunks.append(
-            text[:split_at]
+        send_discord(
+            content[:split_at]
         )
 
-        text = (
-            text[split_at:]
+        content = (
+            content[split_at:]
             .lstrip()
         )
 
-    if text:
-        chunks.append(text)
-
-    for chunk in chunks:
-        send_discord(chunk)
+    if content:
+        send_discord(content)
 
 
 # =========================================================
-# LOAD COIN LISTS
+# FETCH OFFICIAL STEAM NEWS
 # =========================================================
 
-portfolio_config = load_json(
-    COINS_FILE,
-    {"coins": []},
+response = requests.get(
+    NEWS_URL,
+    params={
+        "appid": APP_ID,
+        "count": 50,
+        "maxlength": 10000,
+        "feeds": "steam_community_announcements",
+    },
+    headers={
+        "Accept": "application/json"
+    },
+    timeout=30,
 )
 
-watchlist_config = load_json(
-    WATCHLIST_FILE,
-    {"coins": []},
+response.raise_for_status()
+
+payload = response.json()
+
+news_items = (
+    payload
+    .get("appnews", {})
+    .get("newsitems", [])
 )
 
-portfolio_symbols = [
-    str(symbol).upper()
-    for symbol in portfolio_config.get(
-        "coins",
-        []
-    )
-]
-
-watchlist_symbols = [
-    str(symbol).upper()
-    for symbol in watchlist_config.get(
-        "coins",
-        []
-    )
-]
-
-if not portfolio_symbols:
+if not news_items:
     raise RuntimeError(
-        "crypto_coins.json contains no coins."
+        "Steam returned no CS2 news items."
     )
-
-if not watchlist_symbols:
-    raise RuntimeError(
-        "crypto_watchlist.json contains no coins."
-    )
-
-
-all_symbols = list(
-    dict.fromkeys(
-        portfolio_symbols
-        + watchlist_symbols
-    )
-)
-
-
-# =========================================================
-# CURRENT BRUSSELS TIME
-# =========================================================
-
-now = datetime.now(
-    timezone.utc
-).astimezone(
-    BRUSSELS
-)
-
-print(
-    "Current Brussels time:",
-    now.strftime(
-        "%Y-%m-%d %H:%M:%S %Z"
-    )
-)
 
 
 # =========================================================
 # LOAD STATE
 # =========================================================
 
-state = load_json(
-    STATE_FILE,
-    {},
-)
+state = load_state()
 
-state.setdefault(
-    "marketcap",
-    {}
-)
-
-state.setdefault(
-    "portfolio",
-    {}
-)
-
-state.setdefault(
-    "watchlist",
-    {}
-)
-
-state.setdefault(
-    "marketcap_slot",
-    None
-)
-
-state.setdefault(
-    "portfolio_slot",
-    None
-)
-
-state.setdefault(
-    "watchlist_slot",
-    None
+previous_gid = state.get(
+    "last_gid"
 )
 
 
 # =========================================================
-# DAILY 04:00 SLOT
+# FIRST RUN
 # =========================================================
 #
-# 04:00 Brussels can be:
-# Summer: 02:00 UTC
-# Winter: 03:00 UTC
-#
-# We also accept 05:00 Brussels so a delayed GitHub
-# Action can still perform the same daily measurement.
+# On an empty state we only establish a baseline.
+# No old CS2 updates are sent to Discord.
 #
 # =========================================================
 
-slot = None
+if not previous_gid:
 
-if now.hour in (4, 5):
-    slot = (
-        f"{now.date().isoformat()}-04"
+    newest_gid = str(
+        news_items[0]["gid"]
     )
 
+    state["last_gid"] = newest_gid
+
+    save_state(state)
+
+    print(
+        "First CS2 News scan completed."
+    )
+
+    print(
+        f"Baseline GID: {newest_gid}"
+    )
+
+    raise SystemExit(0)
+
 
 # =========================================================
-# FETCH ALL COIN PRICES
+# FIND NEW ITEMS SINCE LAST SCAN
 # =========================================================
 
-def fetch_prices():
+new_items = []
 
-    regular_symbols = [
-        symbol
-        for symbol in all_symbols
-        if symbol not in SPECIAL_SLUGS
-    ]
+for item in news_items:
 
-    prices = {}
+    gid = str(
+        item.get("gid", "")
+    )
 
-    # -----------------------------------------------------
-    # Regular symbol lookups
-    # -----------------------------------------------------
+    if gid == previous_gid:
+        break
 
-    if regular_symbols:
+    new_items.append(item)
 
-        payload = get_json(
-            PRICE_URL,
-            {
-                "symbol": ",".join(
-                    regular_symbols
-                ),
-                "convert": "EUR",
-                "skip_invalid": "true",
-                "include_market_cap": "true",
-                "include_24h_volume": "true",
-                "include_24h_change": "true",
-                "include_last_updated": "true",
-            },
+
+# =========================================================
+# PROCESS ONLY OFFICIAL CS2 UPDATE POSTS
+# =========================================================
+
+official_updates = []
+
+for item in reversed(new_items):
+
+    title = (
+        item.get("title")
+        or ""
+    ).strip()
+
+    title_lower = title.lower()
+
+    # Only actual Counter-Strike 2 update posts.
+    is_update = (
+        "counter-strike 2 update" in title_lower
+        or title_lower.startswith(
+            "counter-strike 2 update"
         )
+    )
 
-        for item in payload.get(
-            "data",
-            []
-        ):
+    if not is_update:
+        continue
 
-            symbol = str(
-                item.get(
-                    "symbol",
-                    ""
+    official_updates.append(item)
+
+
+# =========================================================
+# SEND NEW UPDATES
+# =========================================================
+
+for item in official_updates:
+
+    title = (
+        item.get("title")
+        or "Counter-Strike 2 Update"
+    ).strip()
+
+    contents = clean_steam_text(
+        item.get("contents")
+        or ""
+    )
+
+    url = (
+        item.get("url")
+        or ""
+    ).strip()
+
+    published_timestamp = item.get(
+        "date"
+    )
+
+    published_text = ""
+
+    if published_timestamp:
+
+        try:
+
+            published_dt = (
+                datetime.fromtimestamp(
+                    int(
+                        published_timestamp
+                    ),
+                    timezone.utc,
                 )
-            ).upper()
-
-            quotes = item.get(
-                "quotes",
-                []
+                .astimezone(
+                    BRUSSELS
+                )
             )
 
-            if not quotes:
-                continue
-
-            quote = quotes[0]
-
-            price = quote.get(
-                "price"
+            published_text = (
+                published_dt.strftime(
+                    "%d-%m-%Y %H:%M"
+                )
+                + " Brussels"
             )
 
-            if price is None:
-                continue
-
-            prices[symbol] = {
-                "name": item.get(
-                    "name",
-                    symbol
-                ),
-                "price": float(
-                    price
-                ),
-                "cmc_24h": (
-                    float(
-                        quote[
-                            "percent_change_24h"
-                        ]
-                    )
-                    if quote.get(
-                        "percent_change_24h"
-                    ) is not None
-                    else None
-                ),
-            }
-
-
-    # -----------------------------------------------------
-    # Exact slug lookups
-    # -----------------------------------------------------
-
-    for symbol, slug in SPECIAL_SLUGS.items():
-
-        if symbol not in all_symbols:
-            continue
-
-        payload = get_json(
-            PRICE_URL,
-            {
-                "slug": slug,
-                "convert": "EUR",
-                "include_market_cap": "true",
-                "include_24h_volume": "true",
-                "include_24h_change": "true",
-                "include_last_updated": "true",
-            },
-        )
-
-        for item in payload.get(
-            "data",
-            []
+        except (
+            TypeError,
+            ValueError,
+            OSError,
         ):
-
-            quotes = item.get(
-                "quotes",
-                []
-            )
-
-            if not quotes:
-                continue
-
-            quote = quotes[0]
-
-            price = quote.get(
-                "price"
-            )
-
-            if price is None:
-                continue
-
-            prices[symbol] = {
-                "name": item.get(
-                    "name",
-                    symbol
-                ),
-                "price": float(
-                    price
-                ),
-                "cmc_24h": (
-                    float(
-                        quote[
-                            "percent_change_24h"
-                        ]
-                    )
-                    if quote.get(
-                        "percent_change_24h"
-                    ) is not None
-                    else None
-                ),
-            }
-
-            break
+            published_text = ""
 
 
-    missing = [
-        symbol
-        for symbol in all_symbols
-        if symbol not in prices
+    lines = [
+        "🔔 **CS2 UPDATE — VALVE**",
+        "",
+        f"**{title}**",
     ]
 
-    if missing:
-        raise RuntimeError(
-            "CMC did not return prices for: "
-            + ", ".join(missing)
-        )
-
-    return prices
-
-
-# =========================================================
-# FETCH TOTAL MARKET CAP
-# =========================================================
-
-def fetch_marketcap():
-
-    payload = get_json(
-        MARKETCAP_URL,
-        {
-            "convert": "EUR"
-        },
-    )
-
-    eur_quote = (
-        payload
-        .get("data", {})
-        .get("quote", {})
-        .get("EUR", {})
-    )
-
-    value = eur_quote.get(
-        "total_market_cap"
-    )
-
-    if value is None:
-        raise RuntimeError(
-            "CMC did not return "
-            "EUR total market cap."
-        )
-
-    return float(value)
-
-
-# =========================================================
-# TEST MODE
-# =========================================================
-
-if TEST_MODE:
-
-    live_prices = fetch_prices()
-
-    live_marketcap = fetch_marketcap()
-
-    send_discord(
-        "🧪 **CRYPTO MONITOR — TEST**\n\n"
-        "✅ CoinMarketCap connection working.\n"
-        "✅ Discord webhook connected.\n\n"
-        f"**Portfolio:** "
-        f"{len(portfolio_symbols)} coins\n"
-        f"**Wantlist:** "
-        f"{len(watchlist_symbols)} coins\n"
-        f"**Prices returned:** "
-        f"{len(live_prices)}/{len(all_symbols)}\n"
-        f"**Total market cap:** "
-        f"{format_money(live_marketcap)}\n"
-        "**Live schedule:** "
-        "daily 04:00 Brussels\n\n"
-        "No saved history was changed."
-    )
-
-    print(
-        "Test completed successfully."
-    )
-
-    raise SystemExit(0)
-
-
-# =========================================================
-# NOTHING TO DO OUTSIDE DAILY SLOT
-# =========================================================
-
-if not slot:
-
-    print(
-        "No crypto job is due right now."
-    )
-
-    raise SystemExit(0)
-
-
-# =========================================================
-# FETCH CURRENT PRICES
-# =========================================================
-
-current_prices = fetch_prices()
-
-
-# =========================================================
-# TOTAL CRYPTO MARKET CAP
-# DAILY 04:00 — SEPARATE DISCORD MESSAGE
-# =========================================================
-
-if state.get(
-    "marketcap_slot"
-) != slot:
-
-    current_marketcap = (
-        fetch_marketcap()
-    )
-
-    previous_marketcap = (
-        state
-        .get("marketcap", {})
-        .get("value")
-    )
-
-    if previous_marketcap is None:
-
-        print(
-            "Creating first market-cap baseline."
-        )
-
-    else:
-
-        marketcap_change = percent_change(
-            previous_marketcap,
-            current_marketcap,
-        )
-
-        send_chunks([
-            "🌐 **TOTAL CRYPTO MARKET CAP — DAILY 04:00**",
+    if published_text:
+        lines.extend([
+            f"🕓 {published_text}",
             "",
-            (
-                f"**Current:** "
-                f"{format_money(current_marketcap)}"
-            ),
-            (
-                f"**Previous 04:00:** "
-                f"{format_money(previous_marketcap)}"
-            ),
-            (
-                f"**04:00 → 04:00:** "
-                f"{marketcap_change:+.2f}%"
-            ),
-            "",
-            (
-                f"🕓 "
-                f"{now.strftime('%d-%m-%Y %H:%M')} "
-                f"Brussels"
-            ),
         ])
 
-    state["marketcap"] = {
-        "value": current_marketcap,
-        "timestamp": now.isoformat(),
-    }
+    if contents:
+        lines.extend([
+            contents,
+            "",
+        ])
 
-    state["marketcap_slot"] = slot
+    if url:
+        lines.extend([
+            f"🔗 {url}",
+        ])
 
+    message = "\n".join(
+        lines
+    ).strip()
 
-# =========================================================
-# PORTFOLIO — DAILY 04:00
-# =========================================================
+    send_chunks(message)
 
-if state.get(
-    "portfolio_slot"
-) != slot:
-
-    previous_portfolio = state.get(
-        "portfolio",
-        {}
+    print(
+        f"Sent CS2 update: {title}"
     )
 
-    # -----------------------------------------------------
-    # First scan = baseline only
-    # -----------------------------------------------------
-
-    if not previous_portfolio:
-
-        print(
-            "Creating first portfolio baseline."
-        )
-
-    else:
-
-        entries = []
-
-        for symbol in portfolio_symbols:
-
-            current = current_prices[
-                symbol
-            ]
-
-            previous = previous_portfolio.get(
-                symbol
-            )
-
-            if not previous:
-                continue
-
-            own_change = percent_change(
-                previous.get("price"),
-                current["price"],
-            )
-
-            if own_change is None:
-                continue
-
-            entries.append({
-                "symbol": symbol,
-                "price": current["price"],
-                "old_price": previous[
-                    "price"
-                ],
-                "own_change": own_change,
-                "cmc_24h": current.get(
-                    "cmc_24h"
-                ),
-            })
-
-
-        # Strongest movement first
-        entries.sort(
-            key=lambda item: item[
-                "own_change"
-            ],
-            reverse=True
-        )
-
-
-        lines = [
-            "💰 **CRYPTO PORTFOLIO — DAILY 04:00**",
-            "",
-            (
-                f"**Portfolio:** "
-                f"{len(portfolio_symbols)} coins"
-            ),
-            (
-                "**CMC 24h** = rolling CMC movement"
-            ),
-            (
-                "**04:00 → 04:00** = "
-                "our own daily measurement"
-            ),
-            "",
-        ]
-
-
-        for item in entries:
-
-            own = item[
-                "own_change"
-            ]
-
-            cmc = item[
-                "cmc_24h"
-            ]
-
-            if own >= THRESHOLD:
-                marker = "🟢"
-
-            elif own <= -THRESHOLD:
-                marker = "🔴"
-
-            else:
-                marker = "•"
-
-            if cmc is None:
-                cmc_text = "n/a"
-            else:
-                cmc_text = (
-                    f"{cmc:+.2f}%"
-                )
-
-            lines.append(
-                f"{marker} **{item['symbol']}** | "
-                f"CMC 24h: {cmc_text} | "
-                f"04:00→04:00: "
-                f"{own:+.2f}% | "
-                f"{format_price(item['old_price'])} "
-                f"→ "
-                f"{format_price(item['price'])}"
-            )
-
-
-        send_chunks(lines)
-
-
-    # -----------------------------------------------------
-    # Save today's portfolio baseline
-    # -----------------------------------------------------
-
-    state["portfolio"] = {
-        symbol: {
-            "price": current_prices[
-                symbol
-            ]["price"],
-            "name": current_prices[
-                symbol
-            ]["name"],
-            "cmc_24h": current_prices[
-                symbol
-            ].get("cmc_24h"),
-        }
-        for symbol in portfolio_symbols
-    }
-
-    state["portfolio_slot"] = slot
-
 
 # =========================================================
-# WANTLIST — DAILY 04:00
+# UPDATE STATE
 # =========================================================
 #
-# Alert if:
-#   CMC 24h <= -5%
-# OR
-#   own 04:00 -> 04:00 <= -5%
-#
-# Double Drop:
-#   BOTH <= -5%
-#
-# Strong Double Drop:
-#   BOTH <= -10%
-#
-# No Discord message when nothing reaches -5%.
+# Always store the newest Steam item.
+# This prevents the same announcement from being
+# processed repeatedly.
 #
 # =========================================================
 
-if state.get(
-    "watchlist_slot"
-) != slot:
+newest_gid = str(
+    news_items[0]["gid"]
+)
 
-    previous_watchlist = state.get(
-        "watchlist",
-        {}
-    )
+state["last_gid"] = newest_gid
 
-    alerts = []
+save_state(state)
 
-
-    # -----------------------------------------------------
-    # First scan = baseline only
-    # -----------------------------------------------------
-
-    if not previous_watchlist:
-
-        print(
-            "Creating first watchlist baseline."
-        )
-
-    else:
-
-        for symbol in watchlist_symbols:
-
-            current = current_prices[
-                symbol
-            ]
-
-            previous = previous_watchlist.get(
-                symbol
-            )
-
-            if not previous:
-                continue
-
-            own_change = percent_change(
-                previous.get("price"),
-                current["price"],
-            )
-
-            cmc_change = current.get(
-                "cmc_24h"
-            )
-
-            if own_change is None:
-                continue
-
-
-            own_drop = (
-                own_change
-                <= -THRESHOLD
-            )
-
-            cmc_drop = (
-                cmc_change is not None
-                and cmc_change
-                <= -THRESHOLD
-            )
-
-
-            # At least one measurement must
-            # show a decline of 5% or more.
-            if not own_drop and not cmc_drop:
-                continue
-
-
-            double_drop = (
-                own_drop
-                and cmc_drop
-            )
-
-
-            strong_double_drop = (
-                double_drop
-                and own_change
-                <= -STRONG_THRESHOLD
-                and cmc_change
-                <= -STRONG_THRESHOLD
-            )
-
-
-            alerts.append({
-                "symbol": symbol,
-                "price": current[
-                    "price"
-                ],
-                "old_price": previous[
-                    "price"
-                ],
-                "own_change": own_change,
-                "cmc_24h": cmc_change,
-                "double_drop": double_drop,
-                "strong_double_drop": (
-                    strong_double_drop
-                ),
-            })
-
-
-        # Worst decline first
-        alerts.sort(
-            key=lambda item: min(
-                item["own_change"],
-                (
-                    item["cmc_24h"]
-                    if item["cmc_24h"]
-                    is not None
-                    else 999.0
-                ),
-            )
-        )
-
-
-        if alerts:
-
-            lines = [
-                "🛒 **CRYPTO WANTLIST — BUYING WATCH**",
-                "",
-                (
-                    "🔻 Showing coins with at least "
-                    "one decline of **-5% or more**"
-                ),
-                (
-                    "**CMC 24h** = rolling CMC movement"
-                ),
-                (
-                    "**04:00 → 04:00** = "
-                    "our own daily measurement"
-                ),
-                "",
-            ]
-
-
-            for item in alerts:
-
-                if item[
-                    "strong_double_drop"
-                ]:
-
-                    label = (
-                        "🔥 **STRONG DOUBLE DROP**"
-                    )
-
-                elif item[
-                    "double_drop"
-                ]:
-
-                    label = (
-                        "🔴 **DOUBLE DROP**"
-                    )
-
-                else:
-
-                    label = (
-                        "🟠 **DROP**"
-                    )
-
-
-                if item[
-                    "cmc_24h"
-                ] is None:
-
-                    cmc_text = "n/a"
-
-                else:
-
-                    cmc_text = (
-                        f"{item['cmc_24h']:+.2f}%"
-                    )
-
-
-                lines.append(
-                    f"{label} — "
-                    f"**{item['symbol']}** "
-                    f"{format_price(item['price'])} | "
-                    f"CMC 24h: {cmc_text} | "
-                    f"04:00→04:00: "
-                    f"{item['own_change']:+.2f}% | "
-                    f"{format_price(item['old_price'])} "
-                    f"→ "
-                    f"{format_price(item['price'])}"
-                )
-
-
-            send_chunks(lines)
-
-        else:
-
-            print(
-                "No watchlist alert: "
-                "no coin dropped 5% or more."
-            )
-
-
-    # -----------------------------------------------------
-    # Save today's watchlist baseline
-    # -----------------------------------------------------
-
-    state["watchlist"] = {
-        symbol: {
-            "price": current_prices[
-                symbol
-            ]["price"],
-            "name": current_prices[
-                symbol
-            ]["name"],
-            "cmc_24h": current_prices[
-                symbol
-            ].get("cmc_24h"),
-        }
-        for symbol in watchlist_symbols
-    }
-
-    state["watchlist_slot"] = slot
-
-
-# =========================================================
-# SAVE STATE
-# =========================================================
-
-save_json(
-    STATE_FILE,
-    state
+print(
+    "CS2 News monitor finished successfully."
 )
 
 print(
-    "Crypto monitor finished successfully."
+    f"New Steam items checked: "
+    f"{len(new_items)}"
+)
+
+print(
+    f"New official CS2 updates sent: "
+    f"{len(official_updates)}"
 )
