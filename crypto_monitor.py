@@ -14,9 +14,9 @@ import requests
 
 CMC_BASE = "https://pro-api.coinmarketcap.com/public-api"
 
-PRICE_URL = (
+QUOTES_URL = (
     CMC_BASE
-    + "/v2/simple/price"
+    + "/v3/cryptocurrency/quotes/latest"
 )
 
 MARKETCAP_URL = (
@@ -24,8 +24,12 @@ MARKETCAP_URL = (
     + "/v1/global-metrics/quotes/latest"
 )
 
-COINS_FILE = Path(
+SWAPLIST_FILE = Path(
     "crypto_coins.json"
+)
+
+WISHLIST_FILE = Path(
+    "crypto_watchlist.json"
 )
 
 STATE_FILE = Path(
@@ -41,22 +45,39 @@ EVENT_NAME = os.environ.get(
     "schedule"
 )
 
-THRESHOLD = 0.0
-
 BRUSSELS = ZoneInfo(
     "Europe/Brussels"
 )
+
+TARGET_HOURS = {
+    2,
+    10,
+    18,
+}
+
+SNAPSHOT_KEEP_HOURS = 72
+
+TOP_MOVER_THRESHOLD = 5.0
+
+WISHLIST_DROP_THRESHOLD = -5.0
+
+WISHLIST_STRONG_THRESHOLD = -7.5
+
+WISHLIST_DOUBLE_THRESHOLD = -10.0
 
 
 # =========================================================
 # SPECIAL CMC LOOKUPS
 # =========================================================
-# CMC symbols are not guaranteed to be unique.
+#
+# Symbols are not always unique.
 #
 # BABY = Babylon
 # W    = Wormhole
 #
-# These two are deliberately queried by slug.
+# These are queried by slug so we don't accidentally get
+# another asset with the same symbol.
+# =========================================================
 
 SPECIAL_SLUGS = {
     "BABY": "babylon",
@@ -257,28 +278,127 @@ def percent_change(
     ) * 100
 
 
+def send_discord(
+    message,
+):
+
+    response = requests.post(
+        DISCORD_WEBHOOK,
+        json={
+            "content": message,
+            "allowed_mentions": {
+                "parse": []
+            },
+        },
+        timeout=30,
+    )
+
+    response.raise_for_status()
+
+
+def send_discord_chunks(
+    message,
+):
+
+    chunk_size = 1900
+
+    chunks = []
+
+    remaining = message
+
+    while len(remaining) > chunk_size:
+
+        split_at = remaining.rfind(
+            "\n",
+            0,
+            chunk_size,
+        )
+
+        if split_at < 500:
+
+            split_at = chunk_size
+
+        chunks.append(
+            remaining[:split_at]
+        )
+
+        remaining = (
+            remaining[
+                split_at:
+            ].lstrip()
+        )
+
+    if remaining:
+
+        chunks.append(
+            remaining
+        )
+
+    for chunk in chunks:
+
+        send_discord(chunk)
+
+
 # =========================================================
-# LOAD COIN LIST
+# LOAD LISTS
 # =========================================================
 
-coin_config = load_json(
-    COINS_FILE,
+swap_config = load_json(
+    SWAPLIST_FILE,
     {"coins": []},
 )
 
-symbols = [
+wishlist_config = load_json(
+    WISHLIST_FILE,
+    {"coins": []},
+)
+
+swaplist = [
     str(symbol).upper()
-    for symbol in coin_config.get(
+    for symbol in swap_config.get(
         "coins",
         []
     )
 ]
 
-if not symbols:
+wishlist = [
+    str(symbol).upper()
+    for symbol in wishlist_config.get(
+        "coins",
+        []
+    )
+]
+
+
+if not swaplist:
 
     raise RuntimeError(
-        "crypto_coins.json contains no coins."
+        "crypto_coins.json contains no swaplist coins."
     )
+
+
+if not wishlist:
+
+    raise RuntimeError(
+        "crypto_watchlist.json contains no wishlist coins."
+    )
+
+
+# =========================================================
+# ALL COINS
+# =========================================================
+
+all_symbols = list(
+    dict.fromkeys(
+        swaplist + wishlist
+    )
+)
+
+regular_symbols = [
+    symbol
+    for symbol in all_symbols
+    if symbol not in SPECIAL_SLUGS
+]
 
 
 # =========================================================
@@ -306,115 +426,35 @@ print(
 state = load_json(
     STATE_FILE,
     {
-        "marketcap": None,
-        "marketcap_slot": None,
-        "prices": {},
-        "price_slot": None,
+        "snapshots": [],
+        "last_report_slot": None,
     },
 )
 
 
-# =========================================================
-# DETERMINE DUE JOBS
-# =========================================================
-#
-# We schedule the GitHub Action around the DST change:
-#
-# Summer:
-#   02:00 UTC = 04:00 Brussels
-#   14:00 UTC = 16:00 Brussels
-#
-# Winter:
-#   03:00 UTC = 04:00 Brussels
-#   15:00 UTC = 16:00 Brussels
-#
-# The workflow runs on both possible UTC hours and this
-# code decides whether the Brussels slot is due.
-#
-# We also allow a delayed run to execute during the next
-# hour, while the slot ID prevents duplicates.
-
-
-def current_slot_for(
-    target_hour
+if not isinstance(
+    state.get("snapshots"),
+    list,
 ):
 
-    if (
-        now.hour in
-        (target_hour, target_hour + 1)
-    ):
-
-        slot_date = now.date()
-
-        return (
-            f"{slot_date.isoformat()}-"
-            f"{target_hour:02d}"
-        )
-
-    return None
-
-
-marketcap_slot = None
-
-if now.hour in (4, 5):
-
-    marketcap_slot = (
-        f"{now.date().isoformat()}-04"
-    )
-
-elif now.hour in (16, 17):
-
-    marketcap_slot = (
-        f"{now.date().isoformat()}-16"
-    )
-
-
-price_slot = None
-
-if now.hour in (4, 5):
-
-    price_slot = (
-        f"{now.date().isoformat()}-04"
-    )
+    state["snapshots"] = []
 
 
 # =========================================================
-# TEST MODE
+# FETCH CURRENT QUOTES
 # =========================================================
 #
-# When manually running the workflow with test mode,
-# fetch live data and send a test message, but DO NOT
-# change the saved baseline.
+# CMC v3 gives us:
 #
-# This allows us to test CMC + Discord safely.
+# - current EUR price
+# - CMC 1h
+# - CMC 24h
+#
+# The 8h and 12h figures are calculated from our own
+# silent snapshots.
 # =========================================================
 
-if EVENT_NAME == "workflow_dispatch":
-
-    test_mode = (
-        os.environ.get(
-            "CRYPTO_TEST_MODE",
-            "false"
-        ).lower()
-        == "true"
-    )
-
-else:
-
-    test_mode = False
-
-
-# =========================================================
-# FETCH PRICES
-# =========================================================
-
-def fetch_prices():
-
-    regular_symbols = [
-        symbol
-        for symbol in symbols
-        if symbol not in SPECIAL_SLUGS
-    ]
+def fetch_quotes():
 
     prices = {}
 
@@ -425,20 +465,30 @@ def fetch_prices():
     if regular_symbols:
 
         response = get_json(
-            PRICE_URL,
+            QUOTES_URL,
             {
                 "symbol": ",".join(
                     regular_symbols
                 ),
                 "convert": "EUR",
-                "skip_invalid": "true",
             },
         )
 
-        for item in response.get(
+        data = response.get(
             "data",
             []
+        )
+
+        if isinstance(
+            data,
+            dict,
         ):
+
+            data = list(
+                data.values()
+            )
+
+        for item in data:
 
             symbol = str(
                 item.get(
@@ -447,21 +497,40 @@ def fetch_prices():
                 )
             ).upper()
 
-            quotes = item.get(
-                "quotes",
+            quote_list = item.get(
+                "quote",
                 []
             )
 
-            if not quotes:
+            if not quote_list:
+
                 continue
 
-            quote = quotes[0]
+            quote = None
+
+            for candidate in quote_list:
+
+                if str(
+                    candidate.get(
+                        "symbol",
+                        ""
+                    )
+                ).upper() == "EUR":
+
+                    quote = candidate
+
+                    break
+
+            if quote is None:
+
+                quote = quote_list[0]
 
             price = quote.get(
                 "price"
             )
 
             if price is None:
+
                 continue
 
             prices[symbol] = {
@@ -469,7 +538,25 @@ def fetch_prices():
                     "name",
                     symbol
                 ),
-                "price": float(price),
+                "price": float(
+                    price
+                ),
+                "change_1h": (
+                    float(
+                        quote.get(
+                            "percent_change_1h",
+                            0
+                        )
+                    )
+                ),
+                "change_24h": (
+                    float(
+                        quote.get(
+                            "percent_change_24h",
+                            0
+                        )
+                    )
+                ),
             }
 
 
@@ -479,44 +566,68 @@ def fetch_prices():
 
     for symbol, slug in SPECIAL_SLUGS.items():
 
-        if symbol not in symbols:
+        if symbol not in all_symbols:
+
             continue
 
         response = get_json(
-            PRICE_URL,
+            QUOTES_URL,
             {
                 "slug": slug,
                 "convert": "EUR",
             },
         )
 
-        for item in response.get(
+        data = response.get(
             "data",
             []
+        )
+
+        if isinstance(
+            data,
+            dict,
         ):
 
-            actual_symbol = str(
-                item.get(
-                    "symbol",
-                    symbol
-                )
-            ).upper()
+            data = list(
+                data.values()
+            )
 
-            quotes = item.get(
-                "quotes",
+        for item in data:
+
+            quote_list = item.get(
+                "quote",
                 []
             )
 
-            if not quotes:
+            if not quote_list:
+
                 continue
 
-            quote = quotes[0]
+            quote = None
+
+            for candidate in quote_list:
+
+                if str(
+                    candidate.get(
+                        "symbol",
+                        ""
+                    )
+                ).upper() == "EUR":
+
+                    quote = candidate
+
+                    break
+
+            if quote is None:
+
+                quote = quote_list[0]
 
             price = quote.get(
                 "price"
             )
 
             if price is None:
+
                 continue
 
             prices[symbol] = {
@@ -524,7 +635,25 @@ def fetch_prices():
                     "name",
                     symbol
                 ),
-                "price": float(price),
+                "price": float(
+                    price
+                ),
+                "change_1h": (
+                    float(
+                        quote.get(
+                            "percent_change_1h",
+                            0
+                        )
+                    )
+                ),
+                "change_24h": (
+                    float(
+                        quote.get(
+                            "percent_change_24h",
+                            0
+                        )
+                    )
+                ),
             }
 
             break
@@ -532,14 +661,14 @@ def fetch_prices():
 
     missing = [
         symbol
-        for symbol in symbols
+        for symbol in all_symbols
         if symbol not in prices
     ]
 
     if missing:
 
         raise RuntimeError(
-            "CMC did not return prices for: "
+            "CMC did not return data for: "
             + ", ".join(missing)
         )
 
@@ -589,12 +718,93 @@ def fetch_marketcap():
 
 
 # =========================================================
-# TEST RUN
+# FIND HISTORICAL SNAPSHOT
 # =========================================================
+#
+# We deliberately use timestamps rather than assuming
+# every GitHub Action runs exactly on time.
+#
+# The workflow will later run every 4 hours.
+#
+# This lets us find:
+#
+# 8h  = previous measurement
+# 12h = silent historical measurement
+# =========================================================
+
+def find_snapshot(
+    snapshots,
+    hours_ago,
+    tolerance_minutes=90,
+):
+
+    if not snapshots:
+
+        return None
+
+    target = (
+        now
+        - timedelta(
+            hours=hours_ago
+        )
+    )
+
+    best = None
+    best_difference = None
+
+    for snapshot in snapshots:
+
+        try:
+
+            snapshot_time = datetime.fromisoformat(
+                snapshot["timestamp"]
+            )
+
+        except Exception:
+
+            continue
+
+        difference = abs(
+            (
+                snapshot_time
+                - target
+            ).total_seconds()
+        )
+
+        if (
+            difference
+            > tolerance_minutes * 60
+        ):
+
+            continue
+
+        if (
+            best_difference is None
+            or difference < best_difference
+        ):
+
+            best = snapshot
+            best_difference = difference
+
+    return best
+
+
+# =========================================================
+# TEST MODE
+# =========================================================
+
+test_mode = (
+    EVENT_NAME == "workflow_dispatch"
+    and os.environ.get(
+        "CRYPTO_TEST_MODE",
+        "false"
+    ).lower() == "true"
+)
+
 
 if test_mode:
 
-    live_prices = fetch_prices()
+    live_prices = fetch_quotes()
 
     live_marketcap = fetch_marketcap()
 
@@ -602,35 +812,30 @@ if test_mode:
         "🧪 **CRYPTO MONITOR — TEST**",
         "",
         (
-            f"**Total market cap:** "
+            f"**Market cap:** "
             f"{format_money(live_marketcap)}"
         ),
         (
             f"**Coins returned:** "
-            f"{len(live_prices)}/{len(symbols)}"
+            f"{len(live_prices)}/{len(all_symbols)}"
         ),
         "",
         "✅ CoinMarketCap connection working.",
         "✅ Discord webhook connected.",
         "",
-        "**Tracked:** "
-        + ", ".join(symbols),
+        (
+            f"**Swaplist:** "
+            f"{len(swaplist)} coins"
+        ),
+        (
+            f"**Wishlist:** "
+            f"{len(wishlist)} coins"
+        ),
     ]
 
-    response = requests.post(
-        DISCORD_WEBHOOK,
-        json={
-            "content": "\n".join(
-                message
-            ),
-            "allowed_mentions": {
-                "parse": []
-            },
-        },
-        timeout=30,
+    send_discord(
+        "\n".join(message)
     )
-
-    response.raise_for_status()
 
     print(
         "Test completed successfully."
@@ -640,353 +845,702 @@ if test_mode:
 
 
 # =========================================================
-# DO NOTHING IF NOT A SCHEDULED SLOT
+# FETCH LIVE DATA
 # =========================================================
 
-if not marketcap_slot and not price_slot:
+current_prices = fetch_quotes()
+
+current_marketcap = fetch_marketcap()
+
+
+# =========================================================
+# CREATE CURRENT SNAPSHOT
+# =========================================================
+#
+# This happens every workflow run.
+#
+# It does NOT automatically create a Discord message.
+# =========================================================
+
+current_snapshot = {
+    "timestamp": now.isoformat(),
+    "marketcap": current_marketcap,
+    "prices": current_prices,
+}
+
+
+# =========================================================
+# SAVE SNAPSHOT
+# =========================================================
+
+state["snapshots"].append(
+    current_snapshot
+)
+
+
+# Keep only the useful recent history.
+
+cutoff = (
+    now
+    - timedelta(
+        hours=SNAPSHOT_KEEP_HOURS
+    )
+)
+
+clean_snapshots = []
+
+for snapshot in state["snapshots"]:
+
+    try:
+
+        snapshot_time = datetime.fromisoformat(
+            snapshot["timestamp"]
+        )
+
+    except Exception:
+
+        continue
+
+    if snapshot_time >= cutoff:
+
+        clean_snapshots.append(
+            snapshot
+        )
+
+
+state["snapshots"] = (
+    clean_snapshots
+)
+
+
+# =========================================================
+# DETERMINE REPORT SLOT
+# =========================================================
+
+report_slot = None
+
+if now.hour in TARGET_HOURS:
+
+    report_slot = (
+        f"{now.date().isoformat()}-"
+        f"{now.hour:02d}"
+    )
+
+
+# =========================================================
+# NO REPORT?
+# =========================================================
+#
+# Silent 4-hour snapshot only.
+# =========================================================
+
+if report_slot is None:
+
+    save_json(
+        STATE_FILE,
+        state,
+    )
 
     print(
-        "No crypto job is due right now."
+        "Silent snapshot saved. "
+        "No Discord report is due."
+    )
+
+    raise SystemExit(0)
+
+
+# Prevent duplicate reports if GitHub retries a run.
+
+if state.get(
+    "last_report_slot"
+) == report_slot:
+
+    save_json(
+        STATE_FILE,
+        state,
+    )
+
+    print(
+        "This report slot was already processed."
     )
 
     raise SystemExit(0)
 
 
 # =========================================================
-# MARKET CAP — EVERY 12 HOURS
+# HISTORICAL BASELINES
 # =========================================================
 
-if (
-    marketcap_slot
-    and state.get(
-        "marketcap_slot"
-    ) != marketcap_slot
-):
+snapshot_8h = find_snapshot(
+    state["snapshots"][:-1],
+    8,
+)
 
-    current_marketcap = (
-        fetch_marketcap()
-    )
+snapshot_12h = find_snapshot(
+    state["snapshots"][:-1],
+    12,
+)
 
-    previous_marketcap = state.get(
-        "marketcap"
-    )
 
-    marketcap_change = percent_change(
-        previous_marketcap,
+# =========================================================
+# 1. MARKET CAP
+# =========================================================
+#
+# Only:
+#
+# - current total market cap
+# - 8h change
+#
+# No 12h or 1h market-cap figures.
+# =========================================================
+
+marketcap_change_8h = None
+
+if snapshot_8h:
+
+    marketcap_change_8h = percent_change(
+        snapshot_8h.get(
+            "marketcap"
+        ),
         current_marketcap,
     )
 
 
-    # -----------------------------------------------------
-    # First official slot = baseline only
-    # -----------------------------------------------------
+marketcap_message = [
+    "🌐 **CRYPTO MARKET CAP**",
+    "",
+    (
+        f"Total market cap: "
+        f"{format_money(current_marketcap)}"
+    ),
+]
 
-    if previous_marketcap is None:
+if marketcap_change_8h is not None:
 
-        print(
-            "Creating first market-cap baseline."
-        )
+    marketcap_message.append(
+        f"8h: {marketcap_change_8h:+.2f}%"
+    )
 
-        state["marketcap"] = (
-            current_marketcap
-        )
+else:
 
-        state["marketcap_slot"] = (
-            marketcap_slot
-        )
-
-    else:
-
-        message = [
-            "🌐 **CRYPTO MARKET CAP — 12H**",
-            "",
-            (
-                f"**Total market cap:** "
-                f"{format_money(current_marketcap)}"
-            ),
-            (
-                f"**Since previous measurement:** "
-                f"{marketcap_change:+.2f}%"
-            ),
-            "",
-            (
-                f"🕓 "
-                f"{now.strftime('%d-%m-%Y %H:%M')} "
-                f"Brussels"
-            ),
-        ]
-
-
-        response = requests.post(
-            DISCORD_WEBHOOK,
-            json={
-                "content": "\n".join(
-                    message
-                ),
-                "allowed_mentions": {
-                    "parse": []
-                },
-            },
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-
-        state["marketcap"] = (
-            current_marketcap
-        )
-
-        state["marketcap_slot"] = (
-            marketcap_slot
-        )
-
-        print(
-            "Market-cap notification sent."
-        )
-
-
-# =========================================================
-# COIN PRICES — EVERY DAY AT 04:00
-# =========================================================
-
-if (
-    price_slot
-    and state.get(
-        "price_slot"
-    ) != price_slot
-):
-
-    current_prices = fetch_prices()
-
-    previous_prices = state.get(
-        "prices",
-        {}
+    marketcap_message.append(
+        "8h: —"
     )
 
 
-    # -----------------------------------------------------
-    # First official 04:00 = baseline only
-    # -----------------------------------------------------
+send_discord(
+    "\n".join(
+        marketcap_message
+    )
+)
 
-    if not previous_prices:
 
-        print(
-            "Creating first daily price baseline."
+# =========================================================
+# 2. SWAPLIST
+# =========================================================
+
+swap_entries = []
+
+for symbol in swaplist:
+
+    current = current_prices.get(
+        symbol
+    )
+
+    if not current:
+
+        continue
+
+    old_8h = None
+
+    if snapshot_8h:
+
+        old_8h = (
+            snapshot_8h
+            .get("prices", {})
+            .get(symbol)
         )
 
-        state["prices"] = (
-            current_prices
+    old_12h = None
+
+    if snapshot_12h:
+
+        old_12h = (
+            snapshot_12h
+            .get("prices", {})
+            .get(symbol)
         )
 
-        state["price_slot"] = (
-            price_slot
+    change_8h = None
+
+    if old_8h:
+
+        change_8h = percent_change(
+            old_8h.get("price"),
+            current.get("price"),
+        )
+
+    change_12h = None
+
+    if old_12h:
+
+        change_12h = percent_change(
+            old_12h.get("price"),
+            current.get("price"),
+        )
+
+    entry = {
+        "symbol": symbol,
+        "name": current["name"],
+        "price": current["price"],
+        "change_1h": current["change_1h"],
+        "change_24h": current["change_24h"],
+        "change_8h": change_8h,
+        "change_12h": change_12h,
+        "old_8h_price": (
+            old_8h.get("price")
+            if old_8h
+            else None
+        ),
+    }
+
+    swap_entries.append(
+        entry
+    )
+
+
+# TOP MOVERS are based on CMC 24h.
+#
+# This keeps the list stable and avoids a temporary 1h
+# spike making the main mover list noisy.
+
+top_movers = [
+    entry
+    for entry in swap_entries
+    if abs(
+        entry["change_24h"]
+    ) >= TOP_MOVER_THRESHOLD
+]
+
+top_movers.sort(
+    key=lambda item: abs(
+        item["change_24h"]
+    ),
+    reverse=True,
+)
+
+
+other_coins = [
+    entry
+    for entry in swap_entries
+    if abs(
+        entry["change_24h"]
+    ) < TOP_MOVER_THRESHOLD
+]
+
+other_coins.sort(
+    key=lambda item: item["change_24h"],
+    reverse=True,
+)
+
+
+swap_message = [
+    "🔀 **SWAPLIST**",
+    "",
+]
+
+
+# ---------------------------------------------------------
+# TOP MOVERS
+# ---------------------------------------------------------
+
+if top_movers:
+
+    swap_message.extend(
+        [
+            "🚀 **TOP MOVERS "
+            "(±5% of meer)**",
+            "",
+        ]
+    )
+
+    for item in top_movers:
+
+        swap_message.append(
+            f"**{item['symbol']}** "
+            f"{item['change_24h']:+.2f}%"
+        )
+
+    swap_message.append("")
+
+
+# ---------------------------------------------------------
+# DETAILS FOR TOP MOVERS
+# ---------------------------------------------------------
+
+for item in top_movers:
+
+    swap_message.extend(
+        [
+            f"🪙 **{item['symbol']}**",
+            "",
+            (
+                f"24h: "
+                f"{item['change_24h']:+.2f}%"
+            ),
+        ]
+    )
+
+    if item["old_8h_price"] is not None:
+
+        swap_message.append(
+            (
+                f"{format_price(item['old_8h_price'])}"
+                f" → "
+                f"{format_price(item['price'])}"
+            )
         )
 
     else:
 
-        gainers = []
-        losers = []
+        swap_message.append(
+            "prijs: — → "
+            f"{format_price(item['price'])}"
+        )
 
-        unchanged = []
+    if item["change_12h"] is not None:
+
+        swap_message.append(
+            f"12h: "
+            f"{item['change_12h']:+.2f}%"
+        )
+
+    else:
+
+        swap_message.append(
+            "12h: —"
+        )
+
+    if item["change_8h"] is not None:
+
+        swap_message.append(
+            f"8h: "
+            f"{item['change_8h']:+.2f}%"
+        )
+
+    else:
+
+        swap_message.append(
+            "8h: —"
+        )
+
+    swap_message.append(
+        f"1h: "
+        f"{item['change_1h']:+.2f}%"
+    )
+
+    swap_message.append("")
 
 
-        for symbol in symbols:
+# ---------------------------------------------------------
+# OTHER TRACKED COINS
+# ---------------------------------------------------------
 
-            current = current_prices[
-                symbol
+swap_message.extend(
+    [
+        "📋 **OTHER TRACKED COINS**",
+        "",
+    ]
+)
+
+for item in other_coins:
+
+    swap_message.append(
+        f"{item['symbol']} "
+        f"{item['change_24h']:+.2f}%"
+    )
+
+
+send_discord_chunks(
+    "\n".join(
+        swap_message
+    )
+)
+
+
+# =========================================================
+# 3. WISHLIST
+# =========================================================
+#
+# Only send a Discord message when at least one wishlist
+# coin has a CMC 24h drop of -5% or worse.
+#
+# Double drop:
+#
+# CMC 24h <= -10%
+# AND
+# 8h <= -10%
+# =========================================================
+
+wishlist_entries = []
+
+for symbol in wishlist:
+
+    current = current_prices.get(
+        symbol
+    )
+
+    if not current:
+
+        continue
+
+    change_24h = (
+        current["change_24h"]
+    )
+
+    if change_24h > WISHLIST_DROP_THRESHOLD:
+
+        continue
+
+    old_8h = None
+
+    if snapshot_8h:
+
+        old_8h = (
+            snapshot_8h
+            .get("prices", {})
+            .get(symbol)
+        )
+
+    old_12h = None
+
+    if snapshot_12h:
+
+        old_12h = (
+            snapshot_12h
+            .get("prices", {})
+            .get(symbol)
+        )
+
+    change_8h = None
+
+    if old_8h:
+
+        change_8h = percent_change(
+            old_8h.get("price"),
+            current.get("price"),
+        )
+
+    change_12h = None
+
+    if old_12h:
+
+        change_12h = percent_change(
+            old_12h.get("price"),
+            current.get("price"),
+        )
+
+    double_drop = (
+        change_8h is not None
+        and change_24h
+        <= WISHLIST_DOUBLE_THRESHOLD
+        and change_8h
+        <= WISHLIST_DOUBLE_THRESHOLD
+    )
+
+    wishlist_entries.append(
+        {
+            "symbol": symbol,
+            "name": current["name"],
+            "price": current["price"],
+            "change_1h": current["change_1h"],
+            "change_24h": change_24h,
+            "change_8h": change_8h,
+            "change_12h": change_12h,
+            "double_drop": double_drop,
+        }
+    )
+
+
+# Strongest drops first.
+
+wishlist_entries.sort(
+    key=lambda item: item["change_24h"]
+)
+
+
+if wishlist_entries:
+
+    wishlist_message = [
+        "🛒 **WISHLIST ALERT**",
+        "",
+    ]
+
+    # -----------------------------------------------------
+    # Double drops first
+    # -----------------------------------------------------
+
+    double_drops = [
+        item
+        for item in wishlist_entries
+        if item["double_drop"]
+    ]
+
+    normal_drops = [
+        item
+        for item in wishlist_entries
+        if not item["double_drop"]
+    ]
+
+
+    if double_drops:
+
+        wishlist_message.extend(
+            [
+                "🔥 **STERKE DUBBELE DALING**",
+                "",
             ]
+        )
 
-            previous = previous_prices.get(
-                symbol
-            )
+        for item in double_drops:
 
-            if not previous:
-
-                continue
-
-            old_price = previous.get(
-                "price"
-            )
-
-            new_price = current.get(
-                "price"
-            )
-
-            change = percent_change(
-                old_price,
-                new_price,
-            )
-
-            if change is None:
-
-                continue
-
-            entry = {
-                "symbol": symbol,
-                "name": current["name"],
-                "change": change,
-                "old_price": old_price,
-                "new_price": new_price,
-            }
-
-            if change > 0:
-
-                gainers.append(
-                    entry
+            wishlist_message.append(
+                (
+                    f"**{item['symbol']}** "
+                    f"24h {item['change_24h']:+.2f}%"
+                    f" | "
+                    f"8h {item['change_8h']:+.2f}%"
                 )
+            )
 
-            elif change < 0:
+        wishlist_message.append("")
 
-                losers.append(
-                    entry
-                )
+
+    # -----------------------------------------------------
+    # Normal wishlist drops
+    # -----------------------------------------------------
+
+    if normal_drops:
+
+        wishlist_message.extend(
+            [
+                "📉 **WISHLIST DALINGEN**",
+                "",
+            ]
+        )
+
+        for item in normal_drops:
+
+            if (
+                item["change_24h"]
+                <= WISHLIST_STRONG_THRESHOLD
+            ):
+
+                icon = "🔴"
 
             else:
 
-                unchanged.append(
-                    entry
+                icon = "🟠"
+
+            wishlist_message.append(
+                (
+                    f"{icon} **{item['symbol']}** "
+                    f"{item['change_24h']:+.2f}%"
                 )
+            )
+
+        wishlist_message.append("")
 
 
-        gainers.sort(
-            key=lambda x: x["change"],
-            reverse=True
-        )
+    # -----------------------------------------------------
+    # Detailed context
+    # -----------------------------------------------------
 
-        losers.sort(
-            key=lambda x: x["change"]
-        )
-
-
-        message = [
-            "💰 **CRYPTO — DAILY 04:00**",
+    wishlist_message.extend(
+        [
+            "📊 **DETAILS**",
             "",
-            (
-                f"**Tracked coins:** "
-                f"{len(current_prices)}/{len(symbols)}"
-            ),
         ]
+    )
 
+    for item in wishlist_entries:
 
-        # -------------------------------------------------
-        # Gainers
-        # -------------------------------------------------
+        wishlist_message.extend(
+            [
+                f"🪙 **{item['symbol']}**",
+                (
+                    f"24h: "
+                    f"{item['change_24h']:+.2f}%"
+                ),
+            ]
+        )
 
-        if gainers:
+        if item["change_12h"] is not None:
 
-            message.append("")
-            message.append(
-                "📈 **GAINERS**"
-            )
-
-            for item in gainers:
-
-                message.append(
-                    f"• **{item['symbol']}** "
-                    f"{item['change']:+.2f}% "
-                    f"("
-                    f"{format_price(item['old_price'])}"
-                    f" → "
-                    f"{format_price(item['new_price'])}"
-                    f")"
+            wishlist_message.append(
+                (
+                    f"12h: "
+                    f"{item['change_12h']:+.2f}%"
                 )
-
-
-        # -------------------------------------------------
-        # Losers
-        # -------------------------------------------------
-
-        if losers:
-
-            message.append("")
-            message.append(
-                "📉 **LOSERS**"
             )
 
-            for item in losers:
+        else:
 
-                message.append(
-                    f"• **{item['symbol']}** "
-                    f"{item['change']:+.2f}% "
-                    f"("
-                    f"{format_price(item['old_price'])}"
-                    f" → "
-                    f"{format_price(item['new_price'])}"
-                    f")"
+            wishlist_message.append(
+                "12h: —"
+            )
+
+        if item["change_8h"] is not None:
+
+            wishlist_message.append(
+                (
+                    f"8h: "
+                    f"{item['change_8h']:+.2f}%"
                 )
+            )
 
+        else:
 
-        # -------------------------------------------------
-        # Discord size protection
-        # -------------------------------------------------
+            wishlist_message.append(
+                "8h: —"
+            )
 
-        full_message = "\n".join(
-            message
+        wishlist_message.append(
+            (
+                f"1h: "
+                f"{item['change_1h']:+.2f}%"
+            )
         )
 
-        chunk_size = 1900
+        wishlist_message.append("")
 
 
-        chunks = []
-
-        while len(full_message) > chunk_size:
-
-            split_at = full_message.rfind(
-                "\n",
-                0,
-                chunk_size
-            )
-
-            if split_at < 500:
-
-                split_at = chunk_size
-
-            chunks.append(
-                full_message[:split_at]
-            )
-
-            full_message = (
-                full_message[
-                    split_at:
-                ].lstrip()
-            )
-
-
-        if full_message:
-
-            chunks.append(
-                full_message
-            )
-
-
-        for chunk in chunks:
-
-            response = requests.post(
-                DISCORD_WEBHOOK,
-                json={
-                    "content": chunk,
-                    "allowed_mentions": {
-                        "parse": []
-                    },
-                },
-                timeout=30,
-            )
-
-            response.raise_for_status()
-
-
-        state["prices"] = (
-            current_prices
+    send_discord_chunks(
+        "\n".join(
+            wishlist_message
         )
+    )
 
-        state["price_slot"] = (
-            price_slot
-        )
+    print(
+        f"Wishlist alert sent for "
+        f"{len(wishlist_entries)} coin(s)."
+    )
 
-        print(
-            "Daily crypto price notification sent."
-        )
+else:
+
+    print(
+        "No wishlist drop >= 5%. "
+        "No wishlist Discord message sent."
+    )
+
+
+# =========================================================
+# FINALIZE REPORT SLOT
+# =========================================================
+
+state["last_report_slot"] = (
+    report_slot
+)
 
 
 # =========================================================
@@ -995,8 +1549,9 @@ if (
 
 save_json(
     STATE_FILE,
-    state
+    state,
 )
+
 
 print(
     "Crypto monitor finished successfully."
