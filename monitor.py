@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 
-API_URL = "https://api.pricempire.com/v4/paid/items/prices"
+API_URL = "https://api.pricempire.com/v4/trader/items/prices"
 STATE_FILE = Path("state.json")
 THRESHOLD = 10.0
 
