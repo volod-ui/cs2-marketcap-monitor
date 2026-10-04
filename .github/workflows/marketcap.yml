@@ -1,14 +1,14 @@
-```yaml
 name: CS2 Steam Market Monitor
 
 on:
-  # Handmatig starten vanuit GitHub Actions
   workflow_dispatch:
 
-  # Elke dag om 02:00, 10:00 en 18:00 Belgische tijd
   schedule:
     - cron: "7 2,10,18 * * *"
       timezone: "Europe/Brussels"
+
+permissions:
+  contents: write
 
 jobs:
   monitor:
