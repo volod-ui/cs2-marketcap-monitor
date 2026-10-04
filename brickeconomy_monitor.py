@@ -18,6 +18,7 @@ headers = {
     "User-Agent": "Mozilla/5.0 (compatible; BrickEconomyMonitor/1.0)"
 }
 
+
 response = requests.get(
     URL,
     headers=headers,
@@ -26,13 +27,12 @@ response = requests.get(
 
 response.raise_for_status()
 
-
 soup = BeautifulSoup(response.text, "html.parser")
 
 current = {}
 
 
-# Find minifigure links that contain a current value.
+# Read minifigures from the Retiring Soon page.
 for link in soup.find_all("a", href=True):
 
     href = link.get("href", "")
@@ -54,9 +54,9 @@ for link in soup.find_all("a", href=True):
 
     code = match.group(1).strip()
 
-    # Extract euro value.
+    # BrickEconomy currently displays values in USD.
     price_match = re.search(
-        r"Value\s+€\s*([\d,.]+)",
+        r"Value\s+\$\s*([\d,.]+)",
         text
     )
 
@@ -70,14 +70,13 @@ for link in soup.find_all("a", href=True):
     except ValueError:
         continue
 
-    # Remove the code from the beginning of the visible text.
     name = text
 
     if name.startswith(code):
         name = name[len(code):].strip()
 
     name = re.sub(
-        r"\s+Value\s+€[\d,.]+$",
+        r"\s+Value\s+\$[\d,.]+$",
         "",
         name
     ).strip()
@@ -88,7 +87,7 @@ for link in soup.find_all("a", href=True):
     }
 
 
-# Load previous scan.
+# Load yesterday's state.
 if STATE_FILE.exists():
     previous = json.loads(STATE_FILE.read_text())
 else:
@@ -97,8 +96,29 @@ else:
 
 previous_items = previous.get("items", {})
 
+# First run = baseline only.
+first_run = not bool(previous_items)
 
-# Detect additions and removals.
+
+if first_run:
+
+    STATE_FILE.write_text(
+        json.dumps(
+            {"items": current},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
+
+    print(
+        f"First scan completed. "
+        f"Baseline saved for {len(current)} minifigs."
+    )
+
+    raise SystemExit(0)
+
+
+# Compare lists.
 current_codes = set(current.keys())
 previous_codes = set(previous_items.keys())
 
@@ -106,7 +126,7 @@ added = sorted(current_codes - previous_codes)
 removed = sorted(previous_codes - current_codes)
 
 
-# Detect price changes of at least ±5%.
+# Compare prices.
 price_changes = []
 
 for code in current_codes & previous_codes:
@@ -120,6 +140,7 @@ for code in current_codes & previous_codes:
     change = ((new_price - old_price) / old_price) * 100
 
     if abs(change) >= THRESHOLD:
+
         price_changes.append(
             (
                 change,
@@ -142,7 +163,7 @@ losers = sorted(
 )[:10]
 
 
-# Nothing changed = no Discord message.
+# No changes = no Discord message.
 if not added and not removed and not gainers and not losers:
 
     STATE_FILE.write_text(
@@ -154,36 +175,42 @@ if not added and not removed and not gainers and not losers:
     )
 
     print("No changes detected. No Discord message sent.")
+
     raise SystemExit(0)
 
 
 def money(value):
-    return f"€{value:.2f}"
+    return f"${value:,.2f}"
 
 
 message = [
     "🧱 **BrickEconomy — Daily Update**",
-    f"**Minifigs currently on Retiring Soon:** {len(current):,}",
+    f"**Retiring Soon:** {len(current):,} minifigs",
 ]
 
 
 if added:
+
     message.append("")
-    message.append("🟢 **NEW — added to Retiring Soon**")
+    message.append("🟢 **ADDED — Retiring Soon**")
 
     for code in added:
+
         item = current[code]
 
         message.append(
-            f"• `{code}` {item['name']} — {money(item['price'])}"
+            f"• `{code}` {item['name']} — "
+            f"{money(item['price'])}"
         )
 
 
 if removed:
+
     message.append("")
-    message.append("🔴 **REMOVED — no longer on Retiring Soon**")
+    message.append("🔴 **REMOVED — no longer Retiring Soon**")
 
     for code in removed:
+
         item = previous_items[code]
 
         message.append(
@@ -192,6 +219,7 @@ if removed:
 
 
 if gainers:
+
     message.append("")
     message.append("📈 **Price increases ≥ +5%**")
 
@@ -205,6 +233,7 @@ if gainers:
 
 
 if losers:
+
     message.append("")
     message.append("📉 **Price decreases ≤ -5%**")
 
@@ -231,7 +260,7 @@ discord_response = requests.post(
 discord_response.raise_for_status()
 
 
-# Save the current state for tomorrow.
+# Save today's state.
 STATE_FILE.write_text(
     json.dumps(
         {"items": current},
@@ -242,8 +271,8 @@ STATE_FILE.write_text(
 
 
 print(
-    f"Scan complete: {len(current)} minifigs, "
-    f"{len(added)} added, "
-    f"{len(removed)} removed, "
-    f"{len(price_changes)} significant price changes."
+    f"Scan complete: {len(current)} minifigs | "
+    f"added: {len(added)} | "
+    f"removed: {len(removed)} | "
+    f"price changes: {len(price_changes)}"
 )
