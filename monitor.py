@@ -16,17 +16,17 @@ STRONG_THRESHOLD = 15.0
 
 # Liquidity filters
 MIN_LIQUIDITY = 85.0
-MIN_TRADES_7D = 50          # ← aangepast naar jouw eis
+MIN_TRADES_7D = 50
 MIN_LISTINGS = 5
 
 # Minimum price (EUR)
-MIN_PRICE_EUR = 3.0         # ← aangepast naar jouw eis
+MIN_PRICE_EUR = 3.0
 
 # Steam + csfloat
-SOURCES = "steam,csfloat"    # ← aangepast
+SOURCES = "steam,csfloat"
 
 APP_ID = 730
-CURRENCY = "EUR"             # ← aangepast
+CURRENCY = "EUR"
 
 API_KEY = os.environ["PRICEMPIRE_API_KEY"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
