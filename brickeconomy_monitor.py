@@ -4,123 +4,174 @@ import re
 from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup
 
 
-URL = "https://www.brickeconomy.com/minifigs/retiring-soon"
+# ---------------------------------------------------------
+# Settings
+# ---------------------------------------------------------
+
+SOURCE_URL = (
+    "https://www.brickeconomy.com/minifigs/retiring-soon"
+)
+
+READER_URL = (
+    "https://r.jina.ai/"
+    "https://www.brickeconomy.com/minifigs/retiring-soon"
+)
+
 STATE_FILE = Path("brickeconomy_state.json")
+
 THRESHOLD = 5.0
 
-DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK_BRICKECONOMY"]
+DISCORD_WEBHOOK = os.environ[
+    "DISCORD_WEBHOOK_BRICKECONOMY"
+]
 
+
+# ---------------------------------------------------------
+# Download page through Jina Reader
+# ---------------------------------------------------------
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/136.0 Safari/537.36"
-    )
+    ),
+    "X-Engine": "browser",
+    "X-Respond-With": "markdown",
+    "X-Timeout": "30",
 }
 
 
-# ---------------------------------------------------------
-# Download BrickEconomy page
-# ---------------------------------------------------------
-
 response = requests.get(
-    URL,
+    READER_URL,
     headers=HEADERS,
-    timeout=60,
+    timeout=90,
 )
 
 response.raise_for_status()
 
-soup = BeautifulSoup(response.text, "html.parser")
+page_text = response.text
+
+
+print(
+    f"Downloaded BrickEconomy page: "
+    f"{len(page_text):,} characters"
+)
 
 
 # ---------------------------------------------------------
-# Read current Retiring Soon list
+# Parse minifig links
 # ---------------------------------------------------------
 
 current = {}
 
-for link in soup.find_all("a", href=True):
 
-    href = link.get("href", "")
-    text = " ".join(link.stripped_strings)
+link_pattern = re.compile(
+    r'\[([^\]]+)\]'
+    r'\((https?://www\.brickeconomy\.com/minifig/[^)\s]+)\)'
+)
 
-    # We only want individual minifig pages.
-    if not href.startswith("/minifig/"):
-        continue
 
-    # These entries contain the current BrickEconomy value.
-    if "Value" not in text:
-        continue
+for match in link_pattern.finditer(page_text):
 
-    match = re.search(
-        r"/minifig/([^/]+)",
-        href
+    label = match.group(1).strip()
+    url = match.group(2).strip()
+
+
+    # Extract minifig code from URL.
+    code_match = re.search(
+        r"/minifig/([^/)\s]+)",
+        url
     )
 
-    if not match:
+    if not code_match:
         continue
 
-    code = match.group(1).strip()
 
-    # BrickEconomy currently displays EUR values here.
+    code = code_match.group(1).strip()
+
+
+    # We only want entries with a current value.
+    if "Value" not in label:
+        continue
+
+
+    # BrickEconomy may return different currencies depending
+    # on the page/session. We support the common symbols.
     price_match = re.search(
-        r"Value\s+€\s*([\d,.]+)",
-        text
+        r"Value\s*([€$£])\s*([\d,.]+)",
+        label
     )
 
     if not price_match:
         continue
 
-    price_text = price_match.group(1)
+
+    currency = price_match.group(1)
+    price_text = price_match.group(2)
+
 
     try:
-        # Current BrickEconomy format is e.g. €79.91.
-        price = float(price_text.replace(",", ""))
+
+        price = float(
+            price_text.replace(",", "")
+        )
+
     except ValueError:
+
         continue
 
-    # Remove the minifig code from the start.
-    name = text
 
+    # Remove "Value €XX.XX" / "$XX.XX" / "£XX.XX".
+    name = re.sub(
+        r"\s+Value\s*[€$£]\s*[\d,.]+\s*$",
+        "",
+        label
+    ).strip()
+
+
+    # Remove minifig code from the start.
     if name.startswith(code):
+
         name = name[len(code):].strip()
 
-    # Remove the "Value €XX.XX" suffix.
-    name = re.sub(
-        r"\s+Value\s+€[\d,.]+$",
-        "",
-        name
-    ).strip()
+
+    if not name:
+        name = code
+
 
     current[code] = {
         "name": name,
         "price": price,
+        "currency": currency,
     }
 
 
 # ---------------------------------------------------------
 # Safety check
 # ---------------------------------------------------------
-# Never overwrite a good state with an empty scrape.
-# This protects us if BrickEconomy is temporarily blocked
-# or changes its HTML.
+# Never overwrite the previous state when the page could
+# not be parsed correctly.
 
 if len(current) == 0:
 
+    preview = page_text[:1000].replace(
+        "\n",
+        " "
+    )
+
     raise RuntimeError(
-        "BrickEconomy returned 0 minifigs. "
-        "State was NOT changed."
+        "BrickEconomy page was downloaded, but "
+        "0 minifigs could be parsed. "
+        "State was NOT changed. "
+        f"Preview: {preview}"
     )
 
 
 print(
-    f"Current BrickEconomy list: "
-    f"{len(current)} minifigs"
+    f"Parsed {len(current):,} Retiring Soon minifigs."
 )
 
 
@@ -148,16 +199,15 @@ previous_items = previous.get(
 
 
 # ---------------------------------------------------------
-# FIRST RUN
+# FIRST RUN = baseline only
 # ---------------------------------------------------------
-# The first successful run only creates a baseline.
-# It does NOT send hundreds of "new" notifications.
 
 if not previous_items:
 
     STATE_FILE.write_text(
         json.dumps(
             {
+                "source": SOURCE_URL,
                 "items": current
             },
             ensure_ascii=False,
@@ -166,20 +216,34 @@ if not previous_items:
         encoding="utf-8",
     )
 
+
     print(
-        "First scan completed. "
-        "Baseline saved. No Discord message sent."
+        "First successful scan completed."
+    )
+
+    print(
+        "Baseline saved."
+    )
+
+    print(
+        "No Discord message sent."
     )
 
     raise SystemExit(0)
 
 
 # ---------------------------------------------------------
-# Detect added / removed minifigs
+# Compare list
 # ---------------------------------------------------------
 
-current_codes = set(current.keys())
-previous_codes = set(previous_items.keys())
+current_codes = set(
+    current.keys()
+)
+
+previous_codes = set(
+    previous_items.keys()
+)
+
 
 added = sorted(
     current_codes - previous_codes
@@ -191,26 +255,34 @@ removed = sorted(
 
 
 # ---------------------------------------------------------
-# Detect price changes >= +5% or <= -5%
+# Compare prices
 # ---------------------------------------------------------
 
 price_changes = []
 
-for code in current_codes & previous_codes:
 
-    old_price = previous_items[code].get(
+for code in (
+    current_codes & previous_codes
+):
+
+    old_data = previous_items[code]
+
+    old_price = old_data.get(
         "price"
     )
 
     new_price = current[code]["price"]
 
+
     if not old_price or old_price <= 0:
         continue
+
 
     change = (
         (new_price - old_price)
         / old_price
     ) * 100
+
 
     if abs(change) >= THRESHOLD:
 
@@ -221,6 +293,7 @@ for code in current_codes & previous_codes:
                 current[code]["name"],
                 old_price,
                 new_price,
+                current[code]["currency"],
             )
         )
 
@@ -228,8 +301,9 @@ for code in current_codes & previous_codes:
 # Biggest increases first.
 gainers = sorted(
     [
-        x for x in price_changes
-        if x[0] >= THRESHOLD
+        item
+        for item in price_changes
+        if item[0] >= THRESHOLD
     ],
     reverse=True,
 )[:15]
@@ -238,14 +312,34 @@ gainers = sorted(
 # Biggest decreases first.
 losers = sorted(
     [
-        x for x in price_changes
-        if x[0] <= -THRESHOLD
+        item
+        for item in price_changes
+        if item[0] <= -THRESHOLD
     ]
 )[:15]
 
 
 # ---------------------------------------------------------
-# Nothing changed
+# Save helper
+# ---------------------------------------------------------
+
+def save_state():
+
+    STATE_FILE.write_text(
+        json.dumps(
+            {
+                "source": SOURCE_URL,
+                "items": current
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+
+# ---------------------------------------------------------
+# Nothing changed = no Discord message
 # ---------------------------------------------------------
 
 if (
@@ -255,19 +349,13 @@ if (
     and not losers
 ):
 
-    STATE_FILE.write_text(
-        json.dumps(
-            {
-                "items": current
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
-        encoding="utf-8",
+    save_state()
+
+    print(
+        "No changes detected."
     )
 
     print(
-        "No changes detected. "
         "No Discord message sent."
     )
 
@@ -278,14 +366,31 @@ if (
 # Formatting
 # ---------------------------------------------------------
 
-def money(value):
-    return f"€{value:,.2f}"
+def money(
+    value,
+    currency
+):
 
+    return (
+        f"{currency}{value:,.2f}"
+    )
+
+
+# ---------------------------------------------------------
+# Build Discord message
+# ---------------------------------------------------------
 
 message = [
+
     "🧱 **BrickEconomy — Daily Update**",
+
     "",
-    f"**Retiring Soon:** {len(current):,} minifigs",
+
+    (
+        f"**Retiring Soon:** "
+        f"{len(current):,} minifigs"
+    ),
+
 ]
 
 
@@ -296,17 +401,21 @@ message = [
 if added:
 
     message.append("")
+
     message.append(
-        f"🟢 **ADDED — {len(added)} minifig(s)**"
+        f"🟢 **ADDED — "
+        f"{len(added)} minifig(s)**"
     )
+
 
     for code in added:
 
         item = current[code]
 
         message.append(
-            f"• `{code}` {item['name']} — "
-            f"{money(item['price'])}"
+            f"• `{code}` "
+            f"{item['name']} — "
+            f"{money(item['price'], item['currency'])}"
         )
 
 
@@ -317,16 +426,20 @@ if added:
 if removed:
 
     message.append("")
+
     message.append(
-        f"🔴 **REMOVED — {len(removed)} minifig(s)**"
+        f"🔴 **REMOVED — "
+        f"{len(removed)} minifig(s)**"
     )
+
 
     for code in removed:
 
         item = previous_items[code]
 
         message.append(
-            f"• `{code}` {item['name']}"
+            f"• `{code}` "
+            f"{item['name']}"
         )
 
 
@@ -337,9 +450,11 @@ if removed:
 if gainers:
 
     message.append("")
+
     message.append(
         "📈 **Price increases ≥ +5%**"
     )
+
 
     for (
         change,
@@ -347,13 +462,18 @@ if gainers:
         name,
         old_price,
         new_price,
+        currency,
     ) in gainers:
 
         message.append(
-            f"• `{code}` {name} — "
+            f"• `{code}` "
+            f"{name} — "
             f"**+{change:.2f}%** "
-            f"({money(old_price)} → "
-            f"{money(new_price)})"
+            f"("
+            f"{money(old_price, currency)}"
+            f" → "
+            f"{money(new_price, currency)}"
+            f")"
         )
 
 
@@ -364,9 +484,11 @@ if gainers:
 if losers:
 
     message.append("")
+
     message.append(
         "📉 **Price decreases ≤ -5%**"
     )
+
 
     for (
         change,
@@ -374,13 +496,18 @@ if losers:
         name,
         old_price,
         new_price,
+        currency,
     ) in losers:
 
         message.append(
-            f"• `{code}` {name} — "
+            f"• `{code}` "
+            f"{name} — "
             f"**{change:.2f}%** "
-            f"({money(old_price)} → "
-            f"{money(new_price)})"
+            f"("
+            f"{money(old_price, currency)}"
+            f" → "
+            f"{money(new_price, currency)}"
+            f")"
         )
 
 
@@ -392,6 +519,7 @@ discord_response = requests.post(
     DISCORD_WEBHOOK,
     json={
         "content": "\n".join(message),
+
         "allowed_mentions": {
             "parse": []
         },
@@ -406,16 +534,7 @@ discord_response.raise_for_status()
 # Save today's state
 # ---------------------------------------------------------
 
-STATE_FILE.write_text(
-    json.dumps(
-        {
-            "items": current
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ),
-    encoding="utf-8",
-)
+save_state()
 
 
 print(
