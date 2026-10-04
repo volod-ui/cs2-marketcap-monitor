@@ -45,7 +45,7 @@ jobs:
           PRICEMPIRE_API_KEY: ${{ secrets.PRICEMPIRE_API_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          python bot.py
+          python monitor.py
 
       # ------------------------------------------------------
       # State bewaren
