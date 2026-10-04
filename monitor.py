@@ -11,7 +11,6 @@ import requests
 # ============================================================
 
 API_URL = "https://api.pricempire.com/v4/trader/items/prices"
-
 STATE_FILE = Path("state.json")
 
 # Alert thresholds
@@ -91,7 +90,6 @@ if not isinstance(items, list):
 current_prices = {}
 
 qualified_items = 0
-
 filtered_liquidity = 0
 filtered_volume = 0
 filtered_listings = 0
@@ -100,7 +98,6 @@ filtered_zero_price = 0
 
 
 for item in items:
-
     name = item.get("market_hash_name")
 
     if not name:
@@ -152,7 +149,6 @@ for item in items:
     steam_price = None
 
     for price_row in item.get("prices", []):
-
         if price_row.get("provider_key") != SOURCE:
             continue
 
@@ -211,7 +207,6 @@ for item in items:
 movers = []
 
 for name, current in current_prices.items():
-
     old = previous_prices.get(name)
 
     if old is None:
@@ -250,5 +245,265 @@ for name, current in current_prices.items():
             "old_price": old_price,
             "new_price": current_price,
             "change": change,
-            "liquidity
-```
+            "liquidity": current["liquidity"],
+            "trades_7d": current["trades_7d"],
+            "count": current["count"],
+        }
+    )
+
+
+# ============================================================
+# SORT MOVERS
+# ============================================================
+
+gainers = sorted(
+    [
+        item
+        for item in movers
+        if item["change"] >= THRESHOLD
+    ],
+    key=lambda item: item["change"],
+    reverse=True,
+)[:10]
+
+losers = sorted(
+    [
+        item
+        for item in movers
+        if item["change"] <= -THRESHOLD
+    ],
+    key=lambda item: item["change"],
+)[:10]
+
+
+# ============================================================
+# DISCORD MESSAGE HELPERS
+# ============================================================
+
+def money(value):
+    return f"${value / 100:,.2f}"
+
+
+def movement_icon(change):
+    if change >= STRONG_THRESHOLD:
+        return "🔥"
+
+    if change >= THRESHOLD:
+        return "🟢"
+
+    if change <= -STRONG_THRESHOLD:
+        return "🚨"
+
+    return "🔴"
+
+
+def movement_label(change):
+    if abs(change) >= STRONG_THRESHOLD:
+        return "STRONG"
+
+    return "INTERESTING"
+
+
+# ============================================================
+# BUILD DISCORD MESSAGE
+# ============================================================
+
+message_parts = []
+
+message_parts.append(
+    "📊 **CS2 STEAM MARKET — 8H SCAN**"
+)
+
+message_parts.append("")
+
+message_parts.append(
+    f"**Items monitored:** {qualified_items:,}"
+)
+
+message_parts.append(
+    f"**Filter:** Liquidity ≥ {MIN_LIQUIDITY:.0f} | "
+    f"Trades 7d ≥ {MIN_TRADES_7D} | "
+    f"Listings ≥ {MIN_LISTINGS}"
+)
+
+message_parts.append(
+    f"**Minimum price:** ${MIN_PRICE_USD:.2f}"
+)
+
+message_parts.append(
+    f"**Alert:** ±{THRESHOLD:.1f}%"
+)
+
+message_parts.append(
+    f"**Strong movement:** ±{STRONG_THRESHOLD:.0f}%"
+)
+
+message_parts.append(
+    "**Source:** Steam"
+)
+
+
+# ============================================================
+# GAINERS
+# ============================================================
+
+if gainers:
+    message_parts.append("")
+    message_parts.append(
+        f"🚀 **GAINERS ≥ +{THRESHOLD:.1f}%**"
+    )
+
+    for item in gainers:
+        icon = movement_icon(item["change"])
+        label = movement_label(item["change"])
+
+        message_parts.append(
+            f"{icon} **{item['name']}** "
+            f"`+{item['change']:.2f}%` "
+            f"({money(item['old_price'])} → "
+            f"{money(item['new_price'])}) "
+            f"• {label}"
+        )
+
+        message_parts.append(
+            f"   Liquidity: {item['liquidity']:.0f} "
+            f"| 7d trades: {item['trades_7d']} "
+            f"| listings: {item['count']}"
+        )
+
+
+# ============================================================
+# LOSERS
+# ============================================================
+
+if losers:
+    message_parts.append("")
+    message_parts.append(
+        f"🔻 **LOSERS ≤ -{THRESHOLD:.1f}%**"
+    )
+
+    for item in losers:
+        icon = movement_icon(item["change"])
+        label = movement_label(item["change"])
+
+        message_parts.append(
+            f"{icon} **{item['name']}** "
+            f"`{item['change']:.2f}%` "
+            f"({money(item['old_price'])} → "
+            f"{money(item['new_price'])}) "
+            f"• {label}"
+        )
+
+        message_parts.append(
+            f"   Liquidity: {item['liquidity']:.0f} "
+            f"| 7d trades: {item['trades_7d']} "
+            f"| listings: {item['count']}"
+        )
+
+
+# ============================================================
+# NO SIGNIFICANT MOVEMENTS
+# ============================================================
+
+if not gainers and not losers:
+    message_parts.append("")
+    message_parts.append(
+        "ℹ️ **Geen significante prijsbewegingen gevonden.**"
+    )
+
+
+message = "\n".join(message_parts)
+
+
+# ============================================================
+# SEND TO DISCORD
+# ============================================================
+
+discord_response = requests.post(
+    DISCORD_WEBHOOK,
+    json={
+        "content": message,
+        "allowed_mentions": {
+            "parse": []
+        },
+    },
+    timeout=30,
+)
+
+discord_response.raise_for_status()
+
+
+# ============================================================
+# SAVE CURRENT STATE
+# ============================================================
+
+state_to_save = {
+    "prices": {
+        name: {
+            "price": data["price"],
+            "liquidity": data["liquidity"],
+            "trades_7d": data["trades_7d"],
+            "count": data["count"],
+        }
+        for name, data in current_prices.items()
+    }
+}
+
+STATE_FILE.write_text(
+    json.dumps(
+        state_to_save,
+        separators=(",", ":")
+    ),
+    encoding="utf-8",
+)
+
+
+# ============================================================
+# CONSOLE OUTPUT
+# ============================================================
+
+print("==========================================")
+print("CS2 STEAM MARKET MONITOR")
+print("==========================================")
+
+print(
+    f"Total API items:       {len(items):,}"
+)
+
+print(
+    f"Qualified items:       {qualified_items:,}"
+)
+
+print(
+    f"Filtered liquidity:    {filtered_liquidity:,}"
+)
+
+print(
+    f"Filtered 7d volume:    {filtered_volume:,}"
+)
+
+print(
+    f"Filtered listings:     {filtered_listings:,}"
+)
+
+print(
+    f"Filtered price:        {filtered_price:,}"
+)
+
+print(
+    f"Filtered zero price:   {filtered_zero_price:,}"
+)
+
+print("------------------------------------------")
+
+print(
+    f"Gainers >= +{THRESHOLD:.1f}%: {len(gainers)}"
+)
+
+print(
+    f"Losers <= -{THRESHOLD:.1f}%:  {len(losers)}"
+)
+
+print("------------------------------------------")
+
+print("Scan completed successfully.")
