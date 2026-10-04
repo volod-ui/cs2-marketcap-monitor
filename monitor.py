@@ -7,159 +7,128 @@ import requests
 API_URL = "https://api.pricempire.com/v4/trader/items/prices"
 STATE_FILE = Path("state.json")
 THRESHOLD = 10.0
+SOURCE = "buff163"
 
 api_key = os.environ["PRICEMPIRE_API_KEY"]
 discord_webhook = os.environ["DISCORD_WEBHOOK"]
 
-response = requests.get(
+r = requests.get(
     API_URL,
     headers={"Authorization": f"Bearer {api_key}"},
     params={
         "app_id": 730,
         "currency": "USD",
-        "metas": "marketcap",
+        "sources": SOURCE,
     },
     timeout=90,
 )
 
-response.raise_for_status()
-items = response.json()
+r.raise_for_status()
+items = r.json()
 
-if STATE_FILE.exists():
-    previous = json.loads(STATE_FILE.read_text())
-else:
-    previous = {}
-
-current = {}
-total_marketcap = 0.0
+previous = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+previous_prices = previous.get("prices", {})
+current_prices = {}
 
 for item in items:
     name = item.get("market_hash_name")
-    marketcap = item.get("marketcap")
 
-    if not name or marketcap is None:
+    if not name:
         continue
 
-    try:
-        marketcap = float(marketcap)
-    except (TypeError, ValueError):
-        continue
+    for price_row in item.get("prices", []):
+        if price_row.get("provider_key") != SOURCE:
+            continue
 
-    current[name] = marketcap
-    total_marketcap += marketcap
+        price = price_row.get("price")
+
+        if price is None:
+            continue
+
+        try:
+            current_prices[name] = float(price)
+        except (TypeError, ValueError):
+            pass
+
+        break
 
 
-previous_items = previous.get("items", {})
 movers = []
 
-for name, value in current.items():
-    old_value = previous_items.get(name)
+for name, price in current_prices.items():
+    old = previous_prices.get(name)
 
-    if old_value and old_value > 0:
-        change = ((value - old_value) / old_value) * 100
+    if old and old > 0:
+        change = (price - old) / old * 100
 
         if abs(change) >= THRESHOLD:
-            movers.append((change, name))
+            movers.append((change, name, price, old))
 
 
 gainers = sorted(
-    [x for x in movers if x[0] >= THRESHOLD],
+    (x for x in movers if x[0] >= THRESHOLD),
     reverse=True
 )[:10]
 
 losers = sorted(
-    [x for x in movers if x[0] <= -THRESHOLD]
+    (x for x in movers if x[0] <= -THRESHOLD)
 )[:10]
 
 
-old_total = previous.get("total_marketcap")
-
-if old_total and old_total > 0:
-    total_change = ((total_marketcap - old_total) / old_total) * 100
-else:
-    total_change = None
+def money_cents(value):
+    return f"${value / 100:,.2f}"
 
 
-def money(value):
-    if value >= 1_000_000_000:
-        return f"${value / 1_000_000_000:.2f}B"
-    elif value >= 1_000_000:
-        return f"${value / 1_000_000:.2f}M"
-    elif value >= 1_000:
-        return f"${value / 1_000:.1f}K"
-    else:
-        return f"${value:.0f}"
-
-
-def percentage(value):
-    return f"{value:+.2f}%"
-
-
-message = [
-    "📊 **CS2 Market Cap — 8h scan**",
-    f"**Total market cap:** {money(total_marketcap)}",
+lines = [
+    "📊 **CS2 Price Monitor — 8h scan**",
+    f"**Items scanned:** {len(current_prices):,}",
+    f"**Source:** {SOURCE}",
 ]
 
-if total_change is not None:
-    message.append(
-        f"**Since previous scan:** {percentage(total_change)}"
-    )
-else:
-    message.append(
-        "**Since previous scan:** first scan — baseline created"
-    )
-
-
-message.append("")
-message.append("🚀 **Gainers ≥ +10%**")
+lines.append("\n🚀 **Gainers ≥ +10%**")
 
 if gainers:
-    for change, name in gainers:
-        message.append(
-            f"• `{name}` — {percentage(change)}"
-        )
+    lines.extend(
+        f"• `{name}` — **{change:+.2f}%** "
+        f"({money_cents(old)} → {money_cents(price)})"
+        for change, name, price, old in gainers
+    )
 else:
-    message.append("• None")
+    lines.append("• None")
 
 
-message.append("")
-message.append("🔻 **Losers ≤ -10%**")
+lines.append("\n🔻 **Losers ≤ -10%**")
 
 if losers:
-    for change, name in losers:
-        message.append(
-            f"• `{name}` — {percentage(change)}"
-        )
+    lines.extend(
+        f"• `{name}` — **{change:+.2f}%** "
+        f"({money_cents(old)} → {money_cents(price)})"
+        for change, name, price, old in losers
+    )
 else:
-    message.append("• None")
+    lines.append("• None")
 
 
-payload = {
-    "content": "\n".join(message),
-    "allowed_mentions": {
-        "parse": []
-    },
-}
-
-discord_response = requests.post(
+response = requests.post(
     discord_webhook,
-    json=payload,
+    json={
+        "content": "\n".join(lines),
+        "allowed_mentions": {"parse": []},
+    },
     timeout=30,
 )
 
-discord_response.raise_for_status()
+response.raise_for_status()
 
-
-new_state = {
-    "total_marketcap": total_marketcap,
-    "items": current,
-}
 
 STATE_FILE.write_text(
-    json.dumps(new_state, separators=(",", ":"))
+    json.dumps(
+        {"prices": current_prices},
+        separators=(",", ":")
+    )
 )
 
 print(
-    f"Scanned {len(current)} items. "
-    f"Total market cap: {total_marketcap:.2f}"
+    f"Scanned {len(current_prices)} items; "
+    f"movers: {len(movers)}"
 )
