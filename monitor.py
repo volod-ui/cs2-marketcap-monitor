@@ -4,19 +4,19 @@ from pathlib import Path
 import requests
 
 # ============================================================
-# CONFIGURATION
+# CONFIG
 # ============================================================
 
 API_URL = "https://api.pricempire.com/v4/free/items/prices"
 STATE_FILE = Path("state.json")
 
-THRESHOLD_MIN = 7.5
-THRESHOLD_MAX = 50.0
-STRONG_THRESHOLD = 15.0
+MIN_CHANGE = 7.5      # minimum percentage
+MAX_CHANGE = 50.0     # maximum percentage
+STRONG_CHANGE = 15.0  # strong movement threshold
 
 APP_ID = 730
-CURRENCY = "USD"   # Free tier ondersteunt enkel USD
-SOURCE = "steam"   # Free tier ondersteunt enkel Steam
+CURRENCY = "USD"      # free tier only supports USD
+SOURCE = "steam"      # free tier only supports steam
 
 API_KEY = os.environ["PRICEMPIRE_API_KEY"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
@@ -38,15 +38,12 @@ previous_prices = previous.get("prices", {})
 
 
 # ============================================================
-# FETCH DATA FROM PRICEMPIRE (FREE TIER)
+# FETCH DATA
 # ============================================================
 
 response = requests.get(
     API_URL,
-    headers={
-        "Authorization": f"Bearer {API_KEY}",
-        "Accept": "application/json",
-    },
+    headers={"Authorization": f"Bearer {API_KEY}"},
     params={
         "app_id": APP_ID,
         "currency": CURRENCY,
@@ -59,7 +56,7 @@ response.raise_for_status()
 items = response.json()
 
 if not isinstance(items, list):
-    raise RuntimeError(f"Unexpected API response type: {type(items).__name__}")
+    raise RuntimeError("Unexpected API response format")
 
 
 # ============================================================
@@ -75,11 +72,11 @@ for item in items:
 
     steam_price = None
 
-    for price_row in item.get("prices", []):
-        if price_row.get("provider_key") != SOURCE:
+    for row in item.get("prices", []):
+        if row.get("provider_key") != SOURCE:
             continue
 
-        price = price_row.get("price")
+        price = row.get("price")
         if price is None:
             continue
 
@@ -102,7 +99,7 @@ for item in items:
 
 
 # ============================================================
-# CALCULATE MOVEMENTS
+# DETECT MOVERS
 # ============================================================
 
 movers = []
@@ -123,8 +120,8 @@ for name, new_price in current_prices.items():
 
     change = ((new_price - old_price) / old_price) * 100
 
-    # Alleen alerts tussen 7.5% en 50%
-    if THRESHOLD_MIN <= abs(change) <= THRESHOLD_MAX:
+    # Only include movements between MIN and MAX
+    if MIN_CHANGE <= abs(change) <= MAX_CHANGE:
         movers.append({
             "name": name,
             "old": old_price,
@@ -138,13 +135,13 @@ for name, new_price in current_prices.items():
 # ============================================================
 
 gainers = sorted(
-    [m for m in movers if m["change"] >= THRESHOLD_MIN],
+    [m for m in movers if m["change"] >= MIN_CHANGE],
     key=lambda m: m["change"],
     reverse=True
 )[:10]
 
 losers = sorted(
-    [m for m in movers if m["change"] <= -THRESHOLD_MIN],
+    [m for m in movers if m["change"] <= -MIN_CHANGE],
     key=lambda m: m["change"]
 )[:10]
 
@@ -156,32 +153,31 @@ losers = sorted(
 def usd(value):
     return f"${value / 100:,.2f}"
 
-
 def icon(change):
-    if change >= STRONG_THRESHOLD:
+    if change >= STRONG_CHANGE:
         return "🔥"
-    if change >= THRESHOLD_MIN:
+    if change >= MIN_CHANGE:
         return "🟢"
-    if change <= -STRONG_THRESHOLD:
+    if change <= -STRONG_CHANGE:
         return "🚨"
     return "🔴"
 
 
 # ============================================================
-# BUILD DISCORD MESSAGE
+# BUILD MESSAGE
 # ============================================================
 
 msg = []
 msg.append("📊 **CS2 STEAM MARKET — FREE TIER SCAN**")
 msg.append("")
 msg.append(f"**Items scanned:** {len(current_prices):,}")
-msg.append(f"**Alert range:** ±{THRESHOLD_MIN:.1f}% → ±{THRESHOLD_MAX:.1f}%")
-msg.append(f"**Strong:** ±{STRONG_THRESHOLD:.0f}%")
+msg.append(f"**Alert range:** {MIN_CHANGE}% → {MAX_CHANGE}%")
+msg.append(f"**Strong movement:** ±{STRONG_CHANGE}%")
 msg.append("**Source:** Steam (FREE tier)")
 
 if gainers:
     msg.append("")
-    msg.append(f"🚀 **GAINERS ≥ +{THRESHOLD_MIN:.1f}%**")
+    msg.append(f"🚀 **GAINERS ≥ +{MIN_CHANGE}%**")
     for m in gainers:
         msg.append(
             f"{icon(m['change'])} **{m['name']}** "
@@ -191,7 +187,7 @@ if gainers:
 
 if losers:
     msg.append("")
-    msg.append(f"🔻 **LOSERS ≤ -{THRESHOLD_MIN:.1f}%**")
+    msg.append(f"🔻 **LOSERS ≤ -{MIN_CHANGE}%**")
     for m in losers:
         msg.append(
             f"{icon(m['change'])} **{m['name']}** "
