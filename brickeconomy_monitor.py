@@ -14,14 +14,22 @@ THRESHOLD = 5.0
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK_BRICKECONOMY"]
 
 
-headers = {
-    "User-Agent": "Mozilla/5.0 (compatible; BrickEconomyMonitor/1.0)"
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0 Safari/537.36"
+    )
 }
 
 
+# ---------------------------------------------------------
+# Download BrickEconomy page
+# ---------------------------------------------------------
+
 response = requests.get(
     URL,
-    headers=headers,
+    headers=HEADERS,
     timeout=60,
 )
 
@@ -29,18 +37,23 @@ response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
 
+
+# ---------------------------------------------------------
+# Read current Retiring Soon list
+# ---------------------------------------------------------
+
 current = {}
 
-
-# Read minifigures from the Retiring Soon page.
 for link in soup.find_all("a", href=True):
 
     href = link.get("href", "")
     text = " ".join(link.stripped_strings)
 
+    # We only want individual minifig pages.
     if not href.startswith("/minifig/"):
         continue
 
+    # These entries contain the current BrickEconomy value.
     if "Value" not in text:
         continue
 
@@ -54,9 +67,9 @@ for link in soup.find_all("a", href=True):
 
     code = match.group(1).strip()
 
-    # BrickEconomy currently displays values in USD.
+    # BrickEconomy currently displays EUR values here.
     price_match = re.search(
-        r"Value\s+\$\s*([\d,.]+)",
+        r"Value\s+€\s*([\d,.]+)",
         text
     )
 
@@ -66,17 +79,20 @@ for link in soup.find_all("a", href=True):
     price_text = price_match.group(1)
 
     try:
+        # Current BrickEconomy format is e.g. €79.91.
         price = float(price_text.replace(",", ""))
     except ValueError:
         continue
 
+    # Remove the minifig code from the start.
     name = text
 
     if name.startswith(code):
         name = name[len(code):].strip()
 
+    # Remove the "Value €XX.XX" suffix.
     name = re.sub(
-        r"\s+Value\s+\$[\d,.]+$",
+        r"\s+Value\s+€[\d,.]+$",
         "",
         name
     ).strip()
@@ -87,57 +103,114 @@ for link in soup.find_all("a", href=True):
     }
 
 
-# Load yesterday's state.
+# ---------------------------------------------------------
+# Safety check
+# ---------------------------------------------------------
+# Never overwrite a good state with an empty scrape.
+# This protects us if BrickEconomy is temporarily blocked
+# or changes its HTML.
+
+if len(current) == 0:
+
+    raise RuntimeError(
+        "BrickEconomy returned 0 minifigs. "
+        "State was NOT changed."
+    )
+
+
+print(
+    f"Current BrickEconomy list: "
+    f"{len(current)} minifigs"
+)
+
+
+# ---------------------------------------------------------
+# Load previous state
+# ---------------------------------------------------------
+
 if STATE_FILE.exists():
-    previous = json.loads(STATE_FILE.read_text())
-else:
-    previous = {}
 
-
-previous_items = previous.get("items", {})
-
-# First run = baseline only.
-first_run = not bool(previous_items)
-
-
-if first_run:
-
-    STATE_FILE.write_text(
-        json.dumps(
-            {"items": current},
-            ensure_ascii=False,
-            separators=(",", ":"),
+    previous = json.loads(
+        STATE_FILE.read_text(
+            encoding="utf-8"
         )
     )
 
+else:
+
+    previous = {}
+
+
+previous_items = previous.get(
+    "items",
+    {}
+)
+
+
+# ---------------------------------------------------------
+# FIRST RUN
+# ---------------------------------------------------------
+# The first successful run only creates a baseline.
+# It does NOT send hundreds of "new" notifications.
+
+if not previous_items:
+
+    STATE_FILE.write_text(
+        json.dumps(
+            {
+                "items": current
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
     print(
-        f"First scan completed. "
-        f"Baseline saved for {len(current)} minifigs."
+        "First scan completed. "
+        "Baseline saved. No Discord message sent."
     )
 
     raise SystemExit(0)
 
 
-# Compare lists.
+# ---------------------------------------------------------
+# Detect added / removed minifigs
+# ---------------------------------------------------------
+
 current_codes = set(current.keys())
 previous_codes = set(previous_items.keys())
 
-added = sorted(current_codes - previous_codes)
-removed = sorted(previous_codes - current_codes)
+added = sorted(
+    current_codes - previous_codes
+)
+
+removed = sorted(
+    previous_codes - current_codes
+)
 
 
-# Compare prices.
+# ---------------------------------------------------------
+# Detect price changes >= +5% or <= -5%
+# ---------------------------------------------------------
+
 price_changes = []
 
 for code in current_codes & previous_codes:
 
-    old_price = previous_items[code].get("price")
+    old_price = previous_items[code].get(
+        "price"
+    )
+
     new_price = current[code]["price"]
 
     if not old_price or old_price <= 0:
         continue
 
-    change = ((new_price - old_price) / old_price) * 100
+    change = (
+        (new_price - old_price)
+        / old_price
+    ) * 100
 
     if abs(change) >= THRESHOLD:
 
@@ -152,47 +225,80 @@ for code in current_codes & previous_codes:
         )
 
 
+# Biggest increases first.
 gainers = sorted(
-    [x for x in price_changes if x[0] >= THRESHOLD],
-    reverse=True
-)[:10]
+    [
+        x for x in price_changes
+        if x[0] >= THRESHOLD
+    ],
+    reverse=True,
+)[:15]
 
 
+# Biggest decreases first.
 losers = sorted(
-    [x for x in price_changes if x[0] <= -THRESHOLD]
-)[:10]
+    [
+        x for x in price_changes
+        if x[0] <= -THRESHOLD
+    ]
+)[:15]
 
 
-# No changes = no Discord message.
-if not added and not removed and not gainers and not losers:
+# ---------------------------------------------------------
+# Nothing changed
+# ---------------------------------------------------------
+
+if (
+    not added
+    and not removed
+    and not gainers
+    and not losers
+):
 
     STATE_FILE.write_text(
         json.dumps(
-            {"items": current},
+            {
+                "items": current
+            },
             ensure_ascii=False,
             separators=(",", ":"),
-        )
+        ),
+        encoding="utf-8",
     )
 
-    print("No changes detected. No Discord message sent.")
+    print(
+        "No changes detected. "
+        "No Discord message sent."
+    )
 
     raise SystemExit(0)
 
 
+# ---------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------
+
 def money(value):
-    return f"${value:,.2f}"
+    return f"€{value:,.2f}"
 
 
 message = [
     "🧱 **BrickEconomy — Daily Update**",
+    "",
     f"**Retiring Soon:** {len(current):,} minifigs",
 ]
 
 
+# ---------------------------------------------------------
+# Added
+# ---------------------------------------------------------
+
 if added:
 
     message.append("")
-    message.append("🟢 **ADDED — Retiring Soon**")
+    message.append(
+        f"🟢 **ADDED — {len(added)} minifig(s)**"
+    )
 
     for code in added:
 
@@ -204,10 +310,16 @@ if added:
         )
 
 
+# ---------------------------------------------------------
+# Removed
+# ---------------------------------------------------------
+
 if removed:
 
     message.append("")
-    message.append("🔴 **REMOVED — no longer Retiring Soon**")
+    message.append(
+        f"🔴 **REMOVED — {len(removed)} minifig(s)**"
+    )
 
     for code in removed:
 
@@ -218,33 +330,63 @@ if removed:
         )
 
 
+# ---------------------------------------------------------
+# Price increases
+# ---------------------------------------------------------
+
 if gainers:
 
     message.append("")
-    message.append("📈 **Price increases ≥ +5%**")
+    message.append(
+        "📈 **Price increases ≥ +5%**"
+    )
 
-    for change, code, name, old_price, new_price in gainers:
+    for (
+        change,
+        code,
+        name,
+        old_price,
+        new_price,
+    ) in gainers:
 
         message.append(
             f"• `{code}` {name} — "
             f"**+{change:.2f}%** "
-            f"({money(old_price)} → {money(new_price)})"
+            f"({money(old_price)} → "
+            f"{money(new_price)})"
         )
 
+
+# ---------------------------------------------------------
+# Price decreases
+# ---------------------------------------------------------
 
 if losers:
 
     message.append("")
-    message.append("📉 **Price decreases ≤ -5%**")
+    message.append(
+        "📉 **Price decreases ≤ -5%**"
+    )
 
-    for change, code, name, old_price, new_price in losers:
+    for (
+        change,
+        code,
+        name,
+        old_price,
+        new_price,
+    ) in losers:
 
         message.append(
             f"• `{code}` {name} — "
             f"**{change:.2f}%** "
-            f"({money(old_price)} → {money(new_price)})"
+            f"({money(old_price)} → "
+            f"{money(new_price)})"
         )
 
+
+# ---------------------------------------------------------
+# Send Discord notification
+# ---------------------------------------------------------
 
 discord_response = requests.post(
     DISCORD_WEBHOOK,
@@ -260,18 +402,25 @@ discord_response = requests.post(
 discord_response.raise_for_status()
 
 
-# Save today's state.
+# ---------------------------------------------------------
+# Save today's state
+# ---------------------------------------------------------
+
 STATE_FILE.write_text(
     json.dumps(
-        {"items": current},
+        {
+            "items": current
+        },
         ensure_ascii=False,
         separators=(",", ":"),
-    )
+    ),
+    encoding="utf-8",
 )
 
 
 print(
-    f"Scan complete: {len(current)} minifigs | "
+    f"Scan complete | "
+    f"minifigs: {len(current)} | "
     f"added: {len(added)} | "
     f"removed: {len(removed)} | "
     f"price changes: {len(price_changes)}"
