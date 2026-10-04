@@ -24,17 +24,9 @@ MARKETCAP_URL = (
     + "/v1/global-metrics/quotes/latest"
 )
 
-SWAPLIST_FILE = Path(
-    "crypto_coins.json"
-)
-
-WISHLIST_FILE = Path(
-    "crypto_watchlist.json"
-)
-
-STATE_FILE = Path(
-    "crypto_state.json"
-)
+SWAPLIST_FILE = Path("crypto_coins.json")
+WISHLIST_FILE = Path("crypto_watchlist.json")
+STATE_FILE = Path("crypto_state.json")
 
 DISCORD_WEBHOOK = os.environ[
     "DISCORD_WEBHOOK_CRYPTO"
@@ -49,12 +41,14 @@ BRUSSELS = ZoneInfo(
     "Europe/Brussels"
 )
 
+# Discord reports
 TARGET_HOURS = {
     2,
     10,
     18,
 }
 
+# Silent snapshots happen on the other 4-hour runs.
 SNAPSHOT_KEEP_HOURS = 72
 
 TOP_MOVER_THRESHOLD = 5.0
@@ -68,15 +62,6 @@ WISHLIST_DOUBLE_THRESHOLD = -10.0
 
 # =========================================================
 # SPECIAL CMC LOOKUPS
-# =========================================================
-#
-# Symbols are not always unique.
-#
-# BABY = Babylon
-# W    = Wormhole
-#
-# These are queried by slug so we don't accidentally get
-# another asset with the same symbol.
 # =========================================================
 
 SPECIAL_SLUGS = {
@@ -377,11 +362,9 @@ if not swaplist:
     )
 
 
-if not wishlist:
-
-    raise RuntimeError(
-        "crypto_watchlist.json contains no wishlist coins."
-    )
+# Wishlist may be empty.
+# This allows the user to remove all wishlist coins
+# without breaking the monitor.
 
 
 # =========================================================
@@ -441,17 +424,7 @@ if not isinstance(
 
 
 # =========================================================
-# FETCH CURRENT QUOTES
-# =========================================================
-#
-# CMC v3 gives us:
-#
-# - current EUR price
-# - CMC 1h
-# - CMC 24h
-#
-# The 8h and 12h figures are calculated from our own
-# silent snapshots.
+# FETCH CURRENT COIN QUOTES
 # =========================================================
 
 def fetch_quotes():
@@ -541,20 +514,16 @@ def fetch_quotes():
                 "price": float(
                     price
                 ),
-                "change_1h": (
-                    float(
-                        quote.get(
-                            "percent_change_1h",
-                            0
-                        )
+                "change_1h": float(
+                    quote.get(
+                        "percent_change_1h",
+                        0
                     )
                 ),
-                "change_24h": (
-                    float(
-                        quote.get(
-                            "percent_change_24h",
-                            0
-                        )
+                "change_24h": float(
+                    quote.get(
+                        "percent_change_24h",
+                        0
                     )
                 ),
             }
@@ -638,20 +607,16 @@ def fetch_quotes():
                 "price": float(
                     price
                 ),
-                "change_1h": (
-                    float(
-                        quote.get(
-                            "percent_change_1h",
-                            0
-                        )
+                "change_1h": float(
+                    quote.get(
+                        "percent_change_1h",
+                        0
                     )
                 ),
-                "change_24h": (
-                    float(
-                        quote.get(
-                            "percent_change_24h",
-                            0
-                        )
+                "change_24h": float(
+                    quote.get(
+                        "percent_change_24h",
+                        0
                     )
                 ),
             }
@@ -719,17 +684,6 @@ def fetch_marketcap():
 
 # =========================================================
 # FIND HISTORICAL SNAPSHOT
-# =========================================================
-#
-# We deliberately use timestamps rather than assuming
-# every GitHub Action runs exactly on time.
-#
-# The workflow will later run every 4 hours.
-#
-# This lets us find:
-#
-# 8h  = previous measurement
-# 12h = silent historical measurement
 # =========================================================
 
 def find_snapshot(
@@ -812,7 +766,7 @@ if test_mode:
         "🧪 **CRYPTO MONITOR — TEST**",
         "",
         (
-            f"**Market cap:** "
+            f"**Total market cap:** "
             f"{format_money(live_marketcap)}"
         ),
         (
@@ -824,11 +778,11 @@ if test_mode:
         "✅ Discord webhook connected.",
         "",
         (
-            f"**Swaplist:** "
+            f"**SWAPLIST:** "
             f"{len(swaplist)} coins"
         ),
         (
-            f"**Wishlist:** "
+            f"**WISHLIST:** "
             f"{len(wishlist)} coins"
         ),
     ]
@@ -856,11 +810,6 @@ current_marketcap = fetch_marketcap()
 # =========================================================
 # CREATE CURRENT SNAPSHOT
 # =========================================================
-#
-# This happens every workflow run.
-#
-# It does NOT automatically create a Discord message.
-# =========================================================
 
 current_snapshot = {
     "timestamp": now.isoformat(),
@@ -870,7 +819,7 @@ current_snapshot = {
 
 
 # =========================================================
-# SAVE SNAPSHOT
+# SAVE SNAPSHOT IN MEMORY
 # =========================================================
 
 state["snapshots"].append(
@@ -878,7 +827,7 @@ state["snapshots"].append(
 )
 
 
-# Keep only the useful recent history.
+# Keep useful recent history.
 
 cutoff = (
     now
@@ -908,9 +857,7 @@ for snapshot in state["snapshots"]:
         )
 
 
-state["snapshots"] = (
-    clean_snapshots
-)
+state["snapshots"] = clean_snapshots
 
 
 # =========================================================
@@ -928,10 +875,7 @@ if now.hour in TARGET_HOURS:
 
 
 # =========================================================
-# NO REPORT?
-# =========================================================
-#
-# Silent 4-hour snapshot only.
+# SILENT SNAPSHOT
 # =========================================================
 
 if report_slot is None:
@@ -949,7 +893,9 @@ if report_slot is None:
     raise SystemExit(0)
 
 
-# Prevent duplicate reports if GitHub retries a run.
+# =========================================================
+# PREVENT DUPLICATE REPORTS
+# =========================================================
 
 if state.get(
     "last_report_slot"
@@ -971,14 +917,23 @@ if state.get(
 # HISTORICAL BASELINES
 # =========================================================
 
+historical_snapshots = (
+    state["snapshots"][:-1]
+)
+
 snapshot_8h = find_snapshot(
-    state["snapshots"][:-1],
+    historical_snapshots,
     8,
 )
 
 snapshot_12h = find_snapshot(
-    state["snapshots"][:-1],
+    historical_snapshots,
     12,
+)
+
+snapshot_24h = find_snapshot(
+    historical_snapshots,
+    24,
 )
 
 
@@ -986,13 +941,26 @@ snapshot_12h = find_snapshot(
 # 1. MARKET CAP
 # =========================================================
 #
-# Only:
+# Display:
 #
-# - current total market cap
-# - 8h change
+# Total market cap
+# 24h = CMC market-cap measurement vs 24h ago
+# 8h  = our previous measurement
 #
-# No 12h or 1h market-cap figures.
+# No 12h / 1h market-cap figures.
 # =========================================================
+
+marketcap_change_24h = None
+
+if snapshot_24h:
+
+    marketcap_change_24h = percent_change(
+        snapshot_24h.get(
+            "marketcap"
+        ),
+        current_marketcap,
+    )
+
 
 marketcap_change_8h = None
 
@@ -1014,6 +982,20 @@ marketcap_message = [
         f"{format_money(current_marketcap)}"
     ),
 ]
+
+
+if marketcap_change_24h is not None:
+
+    marketcap_message.append(
+        f"24h: {marketcap_change_24h:+.2f}%"
+    )
+
+else:
+
+    marketcap_message.append(
+        "24h: —"
+    )
+
 
 if marketcap_change_8h is not None:
 
@@ -1109,10 +1091,9 @@ for symbol in swaplist:
     )
 
 
-# TOP MOVERS are based on CMC 24h.
-#
-# This keeps the list stable and avoids a temporary 1h
-# spike making the main mover list noisy.
+# =========================================================
+# TOP MOVERS
+# =========================================================
 
 top_movers = [
     entry
@@ -1158,8 +1139,7 @@ if top_movers:
 
     swap_message.extend(
         [
-            "🚀 **TOP MOVERS "
-            "(±5% of meer)**",
+            "🚀 **TOP MOVERS (±5% of meer)**",
             "",
         ]
     )
@@ -1175,7 +1155,7 @@ if top_movers:
 
 
 # ---------------------------------------------------------
-# DETAILS FOR TOP MOVERS
+# DETAILS
 # ---------------------------------------------------------
 
 for item in top_movers:
@@ -1272,12 +1252,12 @@ send_discord_chunks(
 # 3. WISHLIST
 # =========================================================
 #
-# Only send a Discord message when at least one wishlist
-# coin has a CMC 24h drop of -5% or worse.
+# Only send when at least one wishlist coin
+# has CMC 24h <= -5%.
 #
 # Double drop:
 #
-# CMC 24h <= -10%
+# 24h <= -10%
 # AND
 # 8h <= -10%
 # =========================================================
@@ -1294,9 +1274,7 @@ for symbol in wishlist:
 
         continue
 
-    change_24h = (
-        current["change_24h"]
-    )
+    change_24h = current["change_24h"]
 
     if change_24h > WISHLIST_DROP_THRESHOLD:
 
@@ -1377,7 +1355,7 @@ if wishlist_entries:
     ]
 
     # -----------------------------------------------------
-    # Double drops first
+    # DOUBLE DROPS
     # -----------------------------------------------------
 
     double_drops = [
@@ -1417,7 +1395,7 @@ if wishlist_entries:
 
 
     # -----------------------------------------------------
-    # Normal wishlist drops
+    # NORMAL DROPS
     # -----------------------------------------------------
 
     if normal_drops:
@@ -1453,7 +1431,7 @@ if wishlist_entries:
 
 
     # -----------------------------------------------------
-    # Detailed context
+    # DETAILS
     # -----------------------------------------------------
 
     wishlist_message.extend(
