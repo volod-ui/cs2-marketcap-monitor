@@ -9,7 +9,7 @@ import requests
 # CONFIGURATION
 # ============================================================
 
-API_URL = "https://api.pricempire.com/v4/trader/items/prices"
+API_URL = "https://api.pricempire.com/v4/paid/items/prices"
 STATE_FILE = Path("state.json")
 
 # Alert thresholds
