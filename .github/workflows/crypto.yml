@@ -1,12 +1,9 @@
 name: Crypto Market Monitor
 
 on:
-  # Run around the two Brussels measurement windows.
-  # Brussels is UTC+2 in summer and UTC+1 in winter.
-  # The Python script decides whether the 04:00 or 16:00
-  # Brussels slot is actually due.
   schedule:
-    - cron: "0 2,3,14,15 * * *"
+    # Every 4 hours.
+    - cron: "0 */4 * * *"
 
   workflow_dispatch:
     inputs:
