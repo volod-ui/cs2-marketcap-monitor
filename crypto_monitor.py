@@ -99,11 +99,21 @@ def get_json(
 
                 if attempt < tries - 1:
 
-                    wait = 2 ** attempt
+                    retry_after = response.headers.get(
+                        "Retry-After"
+                    )
+
+                    try:
+                        wait = max(
+                            60,
+                            int(retry_after)
+                        )
+                    except (TypeError, ValueError):
+                        wait = 60
 
                     print(
                         f"CMC rate limited us. "
-                        f"Waiting {wait}s..."
+                        f"Waiting {wait}s before retry..."
                     )
 
                     time.sleep(wait)
