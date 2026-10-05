@@ -20,10 +20,10 @@ def fetch_market_cap():
     response.raise_for_status()
     html = response.text
     cleaned = re.sub(r"<[^>]+>", " ", html)
-    cleaned = re.sub(r"\\s+", " ", cleaned)
-    match = re.search(r"Total market cap\\s+\\$([0-9]+(?:\\.[0-9]+)?)([KMBT])", cleaned, re.IGNORECASE)
+    cleaned = " ".join(cleaned.split())
+    match = re.search(r"Total market cap +[$]([0-9]+(?:[.][0-9]+)?)([KMBT])", cleaned, re.IGNORECASE)
     if not match:
-        match = re.search(r"Total market cap.{0,1500}?\\$([0-9]+(?:\\.[0-9]+)?)([KMBT])", html, re.IGNORECASE | re.DOTALL)
+        match = re.search(r"Total market cap.{0,1500}?[$]([0-9]+(?:[.][0-9]+)?)([KMBT])", html, re.IGNORECASE | re.DOTALL)
     if not match:
         raise RuntimeError("Could not find CS2 market cap on the CS2Cap page.")
     value = float(match.group(1))
@@ -43,7 +43,7 @@ def load_state():
     return {"snapshots": []}
 
 def save_state(state):
-    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + chr(10), encoding="utf-8")
 
 def find_snapshot_at_or_before(snapshots, target_time):
     candidates = []
@@ -90,7 +90,7 @@ def build_message(now, current, previous_8h, previous_24h):
         else:
             lines.append("⏳ **24u:** nog geen meting van 24 uur geleden")
     lines.extend(["", "Bron: CS2Cap market-cap tracker."])
-    return "\\n".join(lines)
+    return chr(10).join(lines)
 
 def main():
     now = datetime.now(BRUSSELS)
