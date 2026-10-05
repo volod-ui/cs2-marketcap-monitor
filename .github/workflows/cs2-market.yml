@@ -1,5 +1,5 @@
 name: CS2 Steam Market Monitor
-run-name: CS2 Market Scan — ${{ github.event_name }}
+run-name: CS2 Market Scan — \${{ github.event_name }}
 
 on:
   # GitHub Actions uses UTC. We run hourly and let the Python script
@@ -37,8 +37,7 @@ jobs:
 
       - name: Run CS2 market monitor
         env:
-          PRICEMPIRE_API_KEY: ${{ secrets.PRICEMPIRE_API_KEY }}
-          DISCORD_WEBHOOK_CSMARKET: ${{ secrets.DISCORD_WEBHOOK_CSMARKET }}
-          FORCE_RUN: ${{ inputs.force_run || false }}
+          DISCORD_WEBHOOK_CSMARKET: \${{ secrets.DISCORD_WEBHOOK_CSMARKET }}
+          FORCE_RUN: \${{ inputs.force_run || false }}
         run: |
           python cs2_market_monitor.py
