@@ -24,7 +24,7 @@ MARKETCAP_URL = (
     + "/v1/global-metrics/quotes/latest"
 )
 
-SWAPLIST_FILE = Path("crypto_coins.json")
+SWAPLIST_FILE = Path("crypto_swaplist.json")
 WISHLIST_FILE = Path("crypto_watchlist.json")
 STATE_FILE = Path("crypto_state.json")
 
@@ -358,7 +358,7 @@ wishlist = [
 if not swaplist:
 
     raise RuntimeError(
-        "crypto_coins.json contains no swaplist coins."
+        "crypto_swaplist.json contains no swaplist coins."
     )
 
 
