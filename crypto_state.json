@@ -1703,6 +1703,432 @@
           "change_24h": 5.95511165
         }
       }
+    },
+    {
+      "timestamp": "2026-10-05T03:07:06.081931+02:00",
+      "marketcap": 2615048976649.9185,
+      "prices": {
+        "BTC": {
+          "name": "Bitcoin Gold AI",
+          "price": 0.000168660443519777,
+          "change_1h": 0.0,
+          "change_24h": 29.32836963
+        },
+        "LTC": {
+          "name": "Litecoin",
+          "price": 62.831804479577436,
+          "change_1h": 0.10382465,
+          "change_24h": 0.02383978
+        },
+        "XRP": {
+          "name": "XRP AI",
+          "price": 7.6561877992477e-05,
+          "change_1h": 0.0,
+          "change_24h": 4.08714102
+        },
+        "DOGE": {
+          "name": "Department of Gov Efficiency (deptofgovtefficiency.com)",
+          "price": 0.012402534336163146,
+          "change_1h": 0.0,
+          "change_24h": -4.75815191
+        },
+        "XMR": {
+          "name": "Monero AI",
+          "price": 0.000587825501936072,
+          "change_1h": 0.0,
+          "change_24h": -20.80294468
+        },
+        "XLM": {
+          "name": "Stellar",
+          "price": 0.19932342175514914,
+          "change_1h": 0.26949255,
+          "change_24h": 3.76427278
+        },
+        "ARB": {
+          "name": "ARB Protocol",
+          "price": 5.212149702868e-06,
+          "change_1h": 0.0,
+          "change_24h": 2.34329143
+        },
+        "ETH": {
+          "name": "Bridged ETH (NEAR Intents)",
+          "price": 2409.268050937432,
+          "change_1h": -0.54553667,
+          "change_24h": 0.47326443
+        },
+        "ZEC": {
+          "name": "Zcash AI",
+          "price": 0.000207434335277382,
+          "change_1h": 0.0,
+          "change_24h": -5.58015908
+        },
+        "IOTA": {
+          "name": "IOTA",
+          "price": 0.053099183712119746,
+          "change_1h": 1.13971591,
+          "change_24h": 8.66014272
+        },
+        "STORJ": {
+          "name": "Storj",
+          "price": 0.026819435176185784,
+          "change_1h": -0.08040387,
+          "change_24h": -0.30495528
+        },
+        "ZRX": {
+          "name": "0x Protocol",
+          "price": 0.11374255435677033,
+          "change_1h": 0.14514541,
+          "change_24h": 3.28106131
+        },
+        "TRX": {
+          "name": "TRON",
+          "price": 0.2986707302917352,
+          "change_1h": 0.04629318,
+          "change_24h": 0.05281382
+        },
+        "LINK": {
+          "name": "Chainlink",
+          "price": 12.653160660986758,
+          "change_1h": -0.1245697,
+          "change_24h": 0.70999615
+        },
+        "ADA": {
+          "name": "Cardano Inu",
+          "price": 1.019433738175e-05,
+          "change_1h": 0.0,
+          "change_24h": 3.60598598
+        },
+        "REQ": {
+          "name": "Request",
+          "price": 0.05014641391435026,
+          "change_1h": 0.95594559,
+          "change_24h": 2.02829581
+        },
+        "FIL": {
+          "name": "Filecoin",
+          "price": 0.9403795708813295,
+          "change_1h": 0.02543808,
+          "change_24h": -0.19408411
+        },
+        "THETA": {
+          "name": "Theta Network",
+          "price": 0.20637448788007512,
+          "change_1h": 0.09291298,
+          "change_24h": 2.24375231
+        },
+        "QNT": {
+          "name": "Quant",
+          "price": 225.62553683176574,
+          "change_1h": 0.76215304,
+          "change_24h": -4.08640912
+        },
+        "FET": {
+          "name": "Artificial Superintelligence Alliance",
+          "price": 0.23055873395756143,
+          "change_1h": 2.51855095,
+          "change_24h": 15.37858727
+        },
+        "COTI": {
+          "name": "COTI",
+          "price": 0.012533492547928933,
+          "change_1h": 1.09812569,
+          "change_24h": 0.53521279
+        },
+        "ALGO": {
+          "name": "Algorand",
+          "price": 0.11689458127271107,
+          "change_1h": -0.77124043,
+          "change_24h": 1.05434317
+        },
+        "RUNE": {
+          "name": "Rune",
+          "price": 0.5777803001234888,
+          "change_1h": 0.16389859,
+          "change_24h": 2.9065078
+        },
+        "STX": {
+          "name": "Seagate Technology Holdings PLC (Derivatives)",
+          "price": 762.6143795533623,
+          "change_1h": 0.76047187,
+          "change_24h": 2.30928914
+        },
+        "CKB": {
+          "name": "Nervos Network",
+          "price": 0.001181026481081673,
+          "change_1h": 0.91082507,
+          "change_24h": 2.06086075
+        },
+        "SOL": {
+          "name": "Wrapped Solana",
+          "price": 107.83791081627515,
+          "change_1h": -0.20076112,
+          "change_24h": 0.98753689
+        },
+        "AR": {
+          "name": "Arweave",
+          "price": 4.011177439412093,
+          "change_1h": 0.30704754,
+          "change_24h": -0.15242911
+        },
+        "RENDER": {
+          "name": "Render",
+          "price": 1.754239524166041,
+          "change_1h": -0.00821303,
+          "change_24h": 0.12467041
+        },
+        "SKL": {
+          "name": "SKALE",
+          "price": 0.004229418000548619,
+          "change_1h": 0.53250353,
+          "change_24h": 2.45009426
+        },
+        "COMP": {
+          "name": "Compound",
+          "price": 22.496297490069814,
+          "change_1h": 0.995022,
+          "change_24h": -0.24116382
+        },
+        "AVAX": {
+          "name": "Avalanche",
+          "price": 9.779411621505552,
+          "change_1h": -0.79960029,
+          "change_24h": -0.84544925
+        },
+        "SHIB": {
+          "name": "SHIBA INU",
+          "price": 8.42389059842497e-10,
+          "change_1h": 0.29254552,
+          "change_24h": -1.46041469
+        },
+        "CRV": {
+          "name": "Curve DAO Token",
+          "price": 0.33866920094475694,
+          "change_1h": 0.79225632,
+          "change_24h": 0.64829306
+        },
+        "GRT": {
+          "name": "The Graph",
+          "price": 0.026358634898278242,
+          "change_1h": 0.54981697,
+          "change_24h": 4.94965401
+        },
+        "SUSHI": {
+          "name": "SushiSwap",
+          "price": 0.2272287919611152,
+          "change_1h": 0.56511904,
+          "change_24h": 0.16299518
+        },
+        "UNI": {
+          "name": "UNI",
+          "price": 9.0271922607777e-05,
+          "change_1h": 0.0,
+          "change_24h": 3.6473383
+        },
+        "CAKE": {
+          "name": "PancakeSwap",
+          "price": 2.2385935557928804,
+          "change_1h": 0.47846038,
+          "change_24h": 0.07584167
+        },
+        "INJ": {
+          "name": "Injective",
+          "price": 6.790022855385549,
+          "change_1h": 0.03602028,
+          "change_24h": -0.23696467
+        },
+        "AAVE": {
+          "name": "Aave",
+          "price": 160.7788454816,
+          "change_1h": 1.18763689,
+          "change_24h": -0.85601773
+        },
+        "1INCH": {
+          "name": "1inch",
+          "price": 0.09375488308606675,
+          "change_1h": 0.03858611,
+          "change_24h": 0.00334627
+        },
+        "SUPER": {
+          "name": "PeerMe",
+          "price": 0.000765865794972632,
+          "change_1h": -0.40916084,
+          "change_24h": 3.41796536
+        },
+        "MINA": {
+          "name": "Mina",
+          "price": 0.14010941815808675,
+          "change_1h": -0.34895905,
+          "change_24h": -2.95882183
+        },
+        "ICP": {
+          "name": "Internet Computer",
+          "price": 2.9947516356017467,
+          "change_1h": 0.15095311,
+          "change_24h": -0.50611408
+        },
+        "AIOZ": {
+          "name": "AIOZ Network",
+          "price": 0.09972059322017295,
+          "change_1h": 0.07525733,
+          "change_24h": 1.68985118
+        },
+        "PENDLE": {
+          "name": "Pendle",
+          "price": 2.1892743702999278,
+          "change_1h": 0.66280822,
+          "change_24h": 0.05948299
+        },
+        "DOG": {
+          "name": "Dog (Bitcoin)",
+          "price": 0.000846623269112501,
+          "change_1h": 0.57034054,
+          "change_24h": 0.06446128
+        },
+        "OP": {
+          "name": "Optimism",
+          "price": 0.1198031201717186,
+          "change_1h": 0.49541059,
+          "change_24h": -0.60212872
+        },
+        "GMX": {
+          "name": "GMX",
+          "price": 7.4724038318636925,
+          "change_1h": -0.52103785,
+          "change_24h": 2.9386142
+        },
+        "WLD": {
+          "name": "Worldcoin",
+          "price": 0.5184226879742722,
+          "change_1h": 0.07295867,
+          "change_24h": -1.96117194
+        },
+        "AXL": {
+          "name": "Axelar",
+          "price": 0.04801756982965358,
+          "change_1h": 0.45193877,
+          "change_24h": -1.49587761
+        },
+        "KAS": {
+          "name": "Kaspa",
+          "price": 0.03809414942191785,
+          "change_1h": 0.40192927,
+          "change_24h": -0.57582053
+        },
+        "SUI": {
+          "name": "Sui",
+          "price": 1.0882885000167484,
+          "change_1h": 1.48417164,
+          "change_24h": 3.77620592
+        },
+        "ONDO": {
+          "name": "Ondo",
+          "price": 0.4439436960550774,
+          "change_1h": 0.48230358,
+          "change_24h": -0.05870422
+        },
+        "APT": {
+          "name": "Aptos",
+          "price": 0.7181477154690883,
+          "change_1h": 0.83394026,
+          "change_24h": 1.44056391
+        },
+        "TAO": {
+          "name": "Bittensor",
+          "price": 270.56781086391226,
+          "change_1h": 0.27934358,
+          "change_24h": -0.34131601
+        },
+        "LMWR": {
+          "name": "LimeWire",
+          "price": 0.009516841973570844,
+          "change_1h": -0.42327327,
+          "change_24h": 0.65432158
+        },
+        "ZRO": {
+          "name": "LayerZero",
+          "price": 1.7274137061266206,
+          "change_1h": -1.56120091,
+          "change_24h": -2.74479833
+        },
+        "POL": {
+          "name": "Bridged Polygon (Anubis)",
+          "price": 0.09772481054056213,
+          "change_1h": -0.18711361,
+          "change_24h": -0.37214984
+        },
+        "WIF": {
+          "name": "World is Flat",
+          "price": 0.000525759274952988,
+          "change_1h": -0.96844125,
+          "change_24h": 29.42702506
+        },
+        "ATH": {
+          "name": "Aethir",
+          "price": 0.006838341036133833,
+          "change_1h": -0.95067435,
+          "change_24h": 7.14454467
+        },
+        "ENA": {
+          "name": "Ethena",
+          "price": 0.21523217682826792,
+          "change_1h": 0.44770783,
+          "change_24h": 1.30658973
+        },
+        "EIGEN": {
+          "name": "EigenCloud",
+          "price": 0.23151711916479878,
+          "change_1h": 0.57315569,
+          "change_24h": -1.06156994
+        },
+        "NIGHT": {
+          "name": "Midnight",
+          "price": 0.039761502270239855,
+          "change_1h": 0.71543323,
+          "change_24h": -7.29908633
+        },
+        "TAIKO": {
+          "name": "Taiko",
+          "price": 0.08280432797654966,
+          "change_1h": 0.31194688,
+          "change_24h": 3.04959413
+        },
+        "ALEO": {
+          "name": "Aleo",
+          "price": 0.026524837682363585,
+          "change_1h": -0.57914151,
+          "change_24h": -1.58432994
+        },
+        "HYPE": {
+          "name": "Hyperliquid",
+          "price": 80.2417571254247,
+          "change_1h": -0.20204741,
+          "change_24h": 0.92965018
+        },
+        "WLFI": {
+          "name": "Wen Lambo Financial",
+          "price": 74.15353982466148,
+          "change_1h": 0.0,
+          "change_24h": 0.98241933
+        },
+        "MANTRA": {
+          "name": "MANTRA",
+          "price": 0.004069398615379006,
+          "change_1h": 0.07686644,
+          "change_24h": -0.03233367
+        },
+        "BABY": {
+          "name": "Babylon",
+          "price": 0.012360835378412188,
+          "change_1h": 1.08547849,
+          "change_24h": 3.68306282
+        },
+        "W": {
+          "name": "Wormhole",
+          "price": 0.012811646289410183,
+          "change_1h": -0.79661122,
+          "change_24h": 3.52603407
+        }
+      }
     }
   ],
   "last_report_slot": "2026-10-05-02"
