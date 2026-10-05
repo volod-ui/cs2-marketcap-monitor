@@ -1,7 +1,9 @@
 import json
+from datetime import datetime
 import os
 import re
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from selenium import webdriver
@@ -15,6 +17,9 @@ URL = "https://www.brickeconomy.com/minifigs/retiring-soon"
 STATE_FILE = Path("brickeconomy_state.json")
 
 THRESHOLD = 5.0
+
+BRUSSELS = ZoneInfo("Europe/Brussels")
+TARGET_HOURS = {2, 10, 18}
 
 DISCORD_WEBHOOK = os.environ[
     "DISCORD_WEBHOOK_BRICKECONOMY"
@@ -210,6 +215,22 @@ print(
     f"Parsed {len(current):,} "
     f"Retiring Soon minifigs."
 )
+
+
+# ---------------------------------------------------------
+# Report schedule
+# ---------------------------------------------------------
+
+now = datetime.now().astimezone(BRUSSELS)
+
+print(
+    "Current Brussels time:",
+    now.strftime("%Y-%m-%d %H:%M:%S %Z")
+)
+
+if now.hour not in TARGET_HOURS:
+    print("Silent run: no Discord report is due.")
+    raise SystemExit(0)
 
 
 # ---------------------------------------------------------
