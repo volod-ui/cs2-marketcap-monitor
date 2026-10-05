@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 import requests
 
 
-API_URL = "https://api.pricempire.com/v4/paid/items/prices"
+API_URL = "https://api.pricempire.com/v4/trader/items/prices"
 APP_ID = 730
 SOURCE = "steam"
-CURRENCY = "EUR"
+CURRENCY = "USD"
 
 MIN_PRICE_EUR = 2.0
 MIN_LIQUIDITY = 85.0
@@ -112,17 +112,20 @@ def build_candidates(items):
             continue
         stats["passed_price"] += 1
 
-        if liquidity < MIN_LIQUIDITY:
+        if liquidity > 0 and liquidity < MIN_LIQUIDITY:
             continue
-        stats["passed_liquidity"] += 1
+        if liquidity > 0:
+            stats["passed_liquidity"] += 1
 
-        if trades_7d < MIN_TRADES_7D:
+        if trades_7d > 0 and trades_7d < MIN_TRADES_7D:
             continue
-        stats["passed_trades"] += 1
+        if trades_7d > 0:
+            stats["passed_trades"] += 1
 
-        if listings < MIN_LISTINGS:
+        if listings > 0 and listings < MIN_LISTINGS:
             continue
-        stats["passed_listings"] += 1
+        if listings > 0:
+            stats["passed_listings"] += 1
 
         if avg_7 <= 0:
             continue
@@ -174,7 +177,7 @@ def build_message(gainers, losers, now, stats):
         f"🕐 {now.strftime('%d-%m-%Y %H:%M')} Brussels",
         "",
         (
-            f"Filters: ≥€{MIN_PRICE_EUR:.0f} | "
+            f"Filters: ≥${MIN_PRICE_EUR:.0f} | "
             f"Liquidity ≥{MIN_LIQUIDITY:.0f} | "
             f"Trades 7d ≥{MIN_TRADES_7D} | "
             f"Listings ≥{MIN_LISTINGS}"
@@ -191,8 +194,8 @@ def build_message(gainers, losers, now, stats):
                 f"**+{item['change']:.2f}%**"
             )
             lines.append(
-                f"€{item['price']:.2f} "
-                f"(7d gem. €{item['avg_7']:.2f}) · "
+                f"${item['price']:.2f} "
+                f"(7d gem. ${item['avg_7']}:.2f}) · "
                 f"Liq {item['liquidity']:.0f} · "
                 f"Trades {item['trades_7d']} · "
                 f"Listings {item['listings']}"
@@ -216,8 +219,8 @@ def build_message(gainers, losers, now, stats):
                 f"**{item['change']:.2f}%**"
             )
             lines.append(
-                f"€{item['price']:.2f} "
-                f"(7d gem. €{item['avg_7']:.2f}) · "
+                f"${item['price']:.2f} "
+                f"(7d gem. ${item['avg_7']}:.2f}) · "
                 f"Liq {item['liquidity']:.0f} · "
                 f"Trades {item['trades_7d']} · "
                 f"Listings {item['listings']}"
@@ -235,7 +238,7 @@ def build_message(gainers, losers, now, stats):
             ),
             (
                 "ℹ️ Beweging = huidige Steam-prijs "
-                "vs. Pricempire 7-daags gemiddelde."
+                "vs. Pricempire 7-daags gemiddelde in USD."
             ),
         ]
     )
