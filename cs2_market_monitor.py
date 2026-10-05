@@ -1,161 +1,262 @@
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
 
 
-API_URL = "https://api.pricempire.com/v4/trader/items/prices"
-APP_ID = 730
-SOURCE = "steam"
-CURRENCY = "USD"
+API_BASE_URL = "https://api-v2.openskin.dev/v1"
+MARKETPLACE = "steam"
 
 MIN_PRICE_USD = 2.0
-MIN_LIQUIDITY = 85.0
+MIN_LIQUIDITY = 85
 MIN_TRADES_7D = 50
 MIN_LISTINGS = 15
 
 TOP_N = 10
 REPORT_HOURS = {2, 10, 18}
+HISTORY_BATCH_SIZE = 500
+HISTORY_REQUEST_DELAY_SECONDS = 0.2
 
 BRUSSELS = ZoneInfo("Europe/Brussels")
 
-API_KEY = os.environ["PRICEMPIRE_API_KEY"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK_CSMARKET"]
 
-FORCE_RUN = (
-    os.environ.get("FORCE_RUN", "false").lower() == "true"
-)
+FORCE_RUN = os.environ.get("FORCE_RUN", "false").lower() == "true"
 
 
-def fetch_items():
+def openskin_get(path, params=None):
     response = requests.get(
-        API_URL,
+        f"{API_BASE_URL}{path}",
+        params=params,
         headers={
-            "Authorization": f"Bearer {API_KEY}",
             "Accept": "application/json",
+            "Accept-Encoding": "gzip",
         },
-        params={
-            "app_id": APP_ID,
-            "sources": SOURCE,
-            "currency": CURRENCY,
-            "avg": "true",
-            "median": "false",
-        },
-        timeout=90,
+        timeout=120,
     )
 
     if response.status_code != 200:
         raise RuntimeError(
-            f"Pricempire API returned HTTP {response.status_code}: "
+            f"OpenSkin API returned HTTP {response.status_code}: "
             f"{response.text[:500]}"
         )
 
-    data = response.json()
+    return response.json()
 
-    if not isinstance(data, list):
+
+def openskin_post(path, payload):
+    response = requests.post(
+        f"{API_BASE_URL}{path}",
+        json=payload,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip",
+        },
+        timeout=120,
+    )
+
+    if response.status_code != 200:
         raise RuntimeError(
-            "Unexpected Pricempire response format: "
-            f"{type(data).__name__}"
+            f"OpenSkin API returned HTTP {response.status_code}: "
+            f"{response.text[:500]}"
         )
 
-    return data
+    return response.json()
 
 
-def get_steam_price(item):
-    prices = item.get("prices") or []
+def fetch_all_prices():
+    data = openskin_get("/prices/all")
 
-    for price in prices:
-        if str(price.get("provider_key", "")).lower() == SOURCE:
-            return price
+    if not isinstance(data, dict) or not isinstance(data.get("data"), dict):
+        raise RuntimeError(
+            "Unexpected OpenSkin /v1/prices/all response format."
+        )
 
-    return None
+    return data["data"]
 
 
-def build_candidates(items):
+def get_steam_price(item_data):
+    steam = item_data.get("steam") or {}
+
+    ask = steam.get("ask")
+    liquidity = steam.get("liquidity_score")
+
+    if liquidity is None:
+        metrics = item_data.get("metrics") or {}
+        liquidity = (metrics.get("steam") or {}).get("liquidity_score")
+
+    listings = steam.get("sell_order_count")
+
+    try:
+        ask = float(ask) if ask is not None else None
+    except (TypeError, ValueError):
+        ask = None
+
+    try:
+        liquidity = float(liquidity) if liquidity is not None else None
+    except (TypeError, ValueError):
+        liquidity = None
+
+    try:
+        listings = int(listings) if listings is not None else None
+    except (TypeError, ValueError):
+        listings = None
+
+    return ask, liquidity, listings
+
+
+def select_candidates(all_prices):
     candidates = []
     stats = {
-        "received": len(items),
+        "received": len(all_prices),
         "with_steam_price": 0,
         "passed_price": 0,
         "passed_liquidity": 0,
-        "passed_trades": 0,
         "passed_listings": 0,
-        "passed_all": 0,
+        "passed_all_pre_history": 0,
     }
 
-    for item in items:
-        steam = get_steam_price(item)
+    for name, item_data in all_prices.items():
+        if not isinstance(item_data, dict):
+            continue
 
-        if not steam:
+        price, liquidity, listings = get_steam_price(item_data)
+
+        if price is None:
             continue
 
         stats["with_steam_price"] += 1
-
-        price_cents = steam.get("price")
-        avg_7_cents = steam.get("avg_7")
-
-        if price_cents is None or avg_7_cents is None:
-            continue
-
-        try:
-            price = float(price_cents) / 100
-            avg_7 = float(avg_7_cents) / 100
-            liquidity = float(item.get("liquidity", 0) or 0)
-            trades_7d = int(float(item.get("trades_7d", 0) or 0))
-            listings = int(float(steam.get("count", 0) or 0))
-        except (TypeError, ValueError):
-            continue
 
         if price < MIN_PRICE_USD:
             continue
         stats["passed_price"] += 1
 
-        if liquidity > 0 and liquidity < MIN_LIQUIDITY:
+        if liquidity is not None and liquidity < MIN_LIQUIDITY:
             continue
-        if liquidity > 0:
+        if liquidity is not None:
             stats["passed_liquidity"] += 1
 
-        if trades_7d > 0 and trades_7d < MIN_TRADES_7D:
+        if listings is not None and listings < MIN_LISTINGS:
             continue
-        if trades_7d > 0:
-            stats["passed_trades"] += 1
-
-        if listings > 0 and listings < MIN_LISTINGS:
-            continue
-        if listings > 0:
+        if listings is not None:
             stats["passed_listings"] += 1
-
-        if avg_7 <= 0:
-            continue
-
-        change = ((price - avg_7) / avg_7) * 100
 
         candidates.append(
             {
-                "name": item.get(
-                    "market_hash_name",
-                    "Unknown item",
-                ),
+                "name": name,
                 "price": price,
-                "avg_7": avg_7,
-                "change": change,
                 "liquidity": liquidity,
-                "trades_7d": trades_7d,
                 "listings": listings,
             }
         )
 
-    stats["passed_all"] = len(candidates)
+    stats["passed_all_pre_history"] = len(candidates)
     return candidates, stats
 
 
-def money(value):
-    if value >= 1000:
-        return f"€{value:,.0f}"
-    if value >= 1:
-        return f"€{value:,.2f}"
-    return f"€{value:,.4f}"
+def fetch_7d_history(candidates, now):
+    end_date = now.astimezone(timezone.utc).date()
+    start_date = end_date - timedelta(days=7)
+
+    history_by_item = {}
+    names = [item["name"] for item in candidates]
+
+    for start in range(0, len(names), HISTORY_BATCH_SIZE):
+        batch = names[start:start + HISTORY_BATCH_SIZE]
+
+        payload = {
+            "items": batch,
+            "marketplace": MARKETPLACE,
+            "interval": "daily",
+            "from": start_date.isoformat(),
+            "to": end_date.isoformat(),
+        }
+
+        response = openskin_post("/history/batch", payload)
+        data = response.get("data") if isinstance(response, dict) else None
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                "Unexpected OpenSkin /v1/history/batch response format."
+            )
+
+        history_by_item.update(data)
+
+        processed = min(start + len(batch), len(names))
+        print(
+            f"Fetched Steam history for {processed}/{len(names)} items."
+        )
+
+        if processed < len(names):
+            time.sleep(HISTORY_REQUEST_DELAY_SECONDS)
+
+    return history_by_item
+
+
+def build_candidates(candidates, history_by_item, stats):
+    final_candidates = []
+
+    stats["with_history"] = 0
+    stats["passed_trades"] = 0
+    stats["passed_all"] = 0
+
+    for item in candidates:
+        points = history_by_item.get(item["name"]) or []
+
+        if not points:
+            continue
+
+        stats["with_history"] += 1
+
+        prices = []
+        volumes = []
+
+        for point in points:
+            try:
+                price = float(point.get("price"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+            if price > 0:
+                prices.append(price)
+
+            volume = point.get("volume")
+            try:
+                if volume is not None:
+                    volumes.append(int(float(volume)))
+            except (TypeError, ValueError):
+                pass
+
+        if not prices:
+            continue
+
+        avg_7 = sum(prices) / len(prices)
+        trades_7d = sum(volumes) if volumes else None
+
+        if trades_7d is not None and trades_7d < MIN_TRADES_7D:
+            continue
+        if trades_7d is not None:
+            stats["passed_trades"] += 1
+
+        if avg_7 <= 0:
+            continue
+
+        change = ((item["price"] - avg_7) / avg_7) * 100
+
+        final_candidates.append(
+            {
+                **item,
+                "avg_7": avg_7,
+                "change": change,
+                "trades_7d": trades_7d,
+            }
+        )
+
+    stats["passed_all"] = len(final_candidates)
+    return final_candidates
 
 
 def send_discord(message):
@@ -170,14 +271,34 @@ def send_discord(message):
     response.raise_for_status()
 
 
+def format_metric(value):
+    if value is None:
+        return "n/a"
+    return f"{value:g}"
+
+
+def price_line(item):
+    return (
+        "$"
+        + f"{item['price']:.2f}"
+        + " (7d gem. $"
+        + f"{item['avg_7']:.2f}"
+        + ") · "
+        + f"Liq {format_metric(item['liquidity'])} · "
+        + f"Trades 7d {format_metric(item['trades_7d'])} · "
+        + f"Listings {format_metric(item['listings'])}"
+    )
+
+
 def build_message(gainers, losers, now, stats):
     lines = [
         "🎮 **CS2 STEAM MARKET — 8U METING**",
         f"🕐 {now.strftime('%d-%m-%Y %H:%M')} Brussels",
         "",
         (
-            f"Filters: ≥${MIN_PRICE_USD:.0f} | "
-            f"Liquidity ≥{MIN_LIQUIDITY:.0f} | "
+            "Filters: $"
+            + f"{MIN_PRICE_USD:.0f}"
+            + f"+ | Liquidity ≥{MIN_LIQUIDITY} | "
             f"Trades 7d ≥{MIN_TRADES_7D} | "
             f"Listings ≥{MIN_LISTINGS}"
         ),
@@ -190,15 +311,9 @@ def build_message(gainers, losers, now, stats):
         for index, item in enumerate(gainers, 1):
             lines.append(
                 f"**{index}. {item['name']}** "
-                f"**+{item['change']:.2f}%**"
+                f"**{item['change']:+.2f}%**"
             )
-            lines.append(
-                f"${item['price']:.2f} "
-                f"(7d gem. ${item['avg_7']:.2f}) · "
-                f"Liq {item['liquidity']:.0f} · "
-                f"Trades {item['trades_7d']} · "
-                f"Listings {item['listings']}"
-            )
+            lines.append(price_line(item))
             lines.append("")
     else:
         lines.append("Geen stijgers gevonden.")
@@ -215,15 +330,9 @@ def build_message(gainers, losers, now, stats):
         for index, item in enumerate(losers, 1):
             lines.append(
                 f"**{index}. {item['name']}** "
-                f"**{item['change']:.2f}%**"
+                f"**{item['change']:+.2f}%**"
             )
-            lines.append(
-                f"${item['price']:.2f} "
-                f"(7d gem. ${item['avg_7']:.2f}) · "
-                f"Liq {item['liquidity']:.0f} · "
-                f"Trades {item['trades_7d']} · "
-                f"Listings {item['listings']}"
-            )
+            lines.append(price_line(item))
             lines.append("")
     else:
         lines.append("Geen dalers gevonden.")
@@ -231,13 +340,11 @@ def build_message(gainers, losers, now, stats):
 
     lines.extend(
         [
+            f"📊 {stats['passed_all']} items voldeden aan alle filters.",
             (
-                f"📊 {stats['passed_all']} items "
-                "voldeden aan alle filters."
-            ),
-            (
-                "ℹ️ Beweging = huidige Steam-prijs "
-                "vs. Pricempire 7-daags gemiddelde in USD."
+                "ℹ️ Beweging = huidige Steam ask-prijs "
+                "vs. het gemiddelde van de beschikbare dagelijkse "
+                "Steam-prijzen over de laatste 7 dagen."
             ),
         ]
     )
@@ -260,19 +367,36 @@ def main():
         )
         return
 
-    print("Fetching Pricempire Steam CS2 data...")
-    items = fetch_items()
+    print("Fetching OpenSkin Steam CS2 data...")
+    all_prices = fetch_all_prices()
 
-    candidates, stats = build_candidates(items)
+    candidates, stats = select_candidates(all_prices)
+
+    print(
+        f"OpenSkin catalog: {stats['received']} items; "
+        f"{stats['passed_all_pre_history']} passed pre-history filters."
+    )
+
+    if not candidates:
+        raise RuntimeError(
+            "No CS2 items passed the Steam price/liquidity/listing filters."
+        )
+
+    history_by_item = fetch_7d_history(candidates, now)
+    final_candidates = build_candidates(
+        candidates,
+        history_by_item,
+        stats,
+    )
 
     gainers = sorted(
-        [item for item in candidates if item["change"] > 0],
+        [item for item in final_candidates if item["change"] > 0],
         key=lambda item: item["change"],
         reverse=True,
     )[:TOP_N]
 
     losers = sorted(
-        [item for item in candidates if item["change"] < 0],
+        [item for item in final_candidates if item["change"] < 0],
         key=lambda item: item["change"],
     )[:TOP_N]
 
