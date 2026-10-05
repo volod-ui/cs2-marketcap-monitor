@@ -41,7 +41,7 @@ def fetch_items():
             "currency": CURRENCY,
             "avg": "true",
             "median": "false",
-            "metas": "liquidity,trades_7d,count",
+            # Pricempire returns liquidity/trades_7d as top-level item metadata\n            # when requested through `metas`; Steam `count` is the provider listing count.\n            "metas": "liquidity,trades_7d,count",
         },
         timeout=90,
     )
