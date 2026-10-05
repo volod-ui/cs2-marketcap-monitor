@@ -10,7 +10,7 @@ APP_ID = 730
 SOURCE = "steam"
 CURRENCY = "USD"
 
-MIN_PRICE_EUR = 2.0
+MIN_PRICE_USD = 2.0
 MIN_LIQUIDITY = 85.0
 MIN_TRADES_7D = 50
 MIN_LISTINGS = 15
@@ -41,7 +41,6 @@ def fetch_items():
             "currency": CURRENCY,
             "avg": "true",
             "median": "false",
-            # Pricempire returns liquidity/trades_7d as top-level item metadata\n            # when requested through `metas`; Steam `count` is the provider listing count.\n            "metas": "liquidity,trades_7d,count",
         },
         timeout=90,
     )
@@ -108,7 +107,7 @@ def build_candidates(items):
         except (TypeError, ValueError):
             continue
 
-        if price < MIN_PRICE_EUR:
+        if price < MIN_PRICE_USD:
             continue
         stats["passed_price"] += 1
 
@@ -177,7 +176,7 @@ def build_message(gainers, losers, now, stats):
         f"🕐 {now.strftime('%d-%m-%Y %H:%M')} Brussels",
         "",
         (
-            f"Filters: ≥${MIN_PRICE_EUR:.0f} | "
+            f"Filters: ≥${MIN_PRICE_USD:.0f} | "
             f"Liquidity ≥{MIN_LIQUIDITY:.0f} | "
             f"Trades 7d ≥{MIN_TRADES_7D} | "
             f"Listings ≥{MIN_LISTINGS}"
