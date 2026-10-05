@@ -1,0 +1,43 @@
+name: CS2 Steam Market Monitor
+
+on:
+  # GitHub Actions uses UTC. We run hourly and let the Python script
+  # enforce the three Brussels report times: 02:00, 10:00, 18:00.
+  schedule:
+    - cron: "7 * * * *"
+
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: "Run a live CS2 market scan now"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install requests
+        run: |
+          pip install requests
+
+      - name: Run CS2 market monitor
+        env:
+          PRICEMPIRE_API_KEY: ${{ secrets.PRICEMPIRE_API_KEY }}
+          DISCORD_WEBHOOK_CSMARKET: ${{ secrets.DISCORD_WEBHOOK_CSMARKET }}
+          FORCE_RUN: ${{ inputs.force_run || false }}
+        run: |
+          python cs2_market_monitor.py
