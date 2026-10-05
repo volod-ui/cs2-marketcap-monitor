@@ -2,7 +2,8 @@ name: BrickEconomy Daily Monitor
 
 on:
   schedule:
-    - cron: "0 18 * * *"
+    # Run hourly; the Python monitor only reports at 02:00, 10:00 and 18:00 Brussels time.
+    - cron: "7 * * * *"
   workflow_dispatch:
 
 permissions:
