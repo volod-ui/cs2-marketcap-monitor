@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: "7 * * * *"
 
-  workflow_dispatch:
+  push:\n\n  workflow_dispatch:
     inputs:
       force_run:
         description: "Run a live CS2 market scan now"
