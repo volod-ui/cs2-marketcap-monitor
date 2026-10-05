@@ -2,8 +2,8 @@ name: Crypto Market Monitor
 
 on:
   schedule:
-    # Every 4 hours.
-    - cron: "0 * * * *"
+    # Three daily report runs.
+    - cron: "0 0,8,16 * * *"
 
   workflow_dispatch:
     inputs:
@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -43,12 +42,10 @@ jobs:
           python crypto_monitor.py
 
       - name: Save crypto state
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add crypto_state.json
-
           git diff --cached --quiet || git commit -m "Update crypto state"
-
           git push
