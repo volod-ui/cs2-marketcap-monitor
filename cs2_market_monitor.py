@@ -194,7 +194,7 @@ def build_message(gainers, losers, now, stats):
             )
             lines.append(
                 f"${item['price']:.2f} "
-                f"(7d gem. ${item['avg_7']}:.2f}) · "
+                f"(7d gem. ${item['avg_7']:.2f}) · "
                 f"Liq {item['liquidity']:.0f} · "
                 f"Trades {item['trades_7d']} · "
                 f"Listings {item['listings']}"
