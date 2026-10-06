@@ -39,7 +39,7 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           CRYPTO_TEST_MODE: ${{ inputs.test_mode || false }}
         run: |
-          python crypto_monitor.py
+          python crypto_runner.py
 
       - name: Save crypto state
         if: always()
