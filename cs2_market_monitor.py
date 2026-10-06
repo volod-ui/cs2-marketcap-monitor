@@ -136,13 +136,11 @@ def select_candidates(all_prices):
 
         if liquidity is not None and liquidity < MIN_LIQUIDITY:
             continue
-        if liquidity is not None:
-            stats["passed_liquidity"] += 1
+        stats["passed_liquidity"] += 1
 
         if listings is not None and listings < MIN_LISTINGS:
             continue
-        if listings is not None:
-            stats["passed_listings"] += 1
+        stats["passed_listings"] += 1
 
         candidates.append(
             {
@@ -200,6 +198,7 @@ def build_candidates(candidates, history_by_item, stats):
     final_candidates = []
 
     stats["with_history"] = 0
+    stats["with_price_history"] = 0
     stats["passed_trades"] = 0
     stats["passed_all"] = 0
 
@@ -233,13 +232,14 @@ def build_candidates(candidates, history_by_item, stats):
         if not prices:
             continue
 
+        stats["with_price_history"] += 1
+
         avg_7 = sum(prices) / len(prices)
         trades_7d = sum(volumes) if volumes else None
 
         if trades_7d is not None and trades_7d < MIN_TRADES_7D:
             continue
-        if trades_7d is not None:
-            stats["passed_trades"] += 1
+        stats["passed_trades"] += 1
 
         if avg_7 <= 0:
             continue
@@ -340,7 +340,19 @@ def build_message(gainers, losers, now, stats):
 
     lines.extend(
         [
-            f"📊 {stats['passed_all']} items voldeden aan alle filters.",
+            "📊 **FILTER-OVERZICHT**",
+            "",
+            f"1️⃣ Catalogus: **{stats['received']:,}** items",
+            f"2️⃣ Steam-prijs beschikbaar: **{stats['with_steam_price']:,}**",
+            f"3️⃣ Prijs ≥ ${MIN_PRICE_USD:.0f}: **{stats['passed_price']:,}**",
+            f"4️⃣ Liquidity ≥ {MIN_LIQUIDITY}: **{stats['passed_liquidity']:,}**",
+            f"5️⃣ Listings ≥ {MIN_LISTINGS}: **{stats['passed_listings']:,}**",
+            f"6️⃣ 7d geschiedenis beschikbaar: **{stats['with_history']:,}**",
+            f"7️⃣ Geldige historische prijzen: **{stats['with_price_history']:,}**",
+            f"8️⃣ Trades 7d ≥ {MIN_TRADES_7D}: **{stats['passed_trades']:,}**",
+            "",
+            f"✅ **Eindresultaat: {stats['passed_all']:,} items**",
+            "",
             (
                 "ℹ️ Beweging = huidige Steam ask-prijs "
                 "vs. het gemiddelde van de beschikbare dagelijkse "
