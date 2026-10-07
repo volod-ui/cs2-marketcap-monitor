@@ -2,10 +2,10 @@ name: CS2 Market Cap Monitor
 run-name: CS2 Market Cap — ${{ github.event_name }}
 
 on:
-  # Belgium time: 02:27, 10:27 and 18:27.
-  # Staggered after crypto and CS2 market to reduce concurrent load.
+  # Belgium time: 02:12, 10:12 and 18:12.
+  # Run CS2 market cap before the CS2 movers scan so Discord shows the cap first.
   schedule:
-    - cron: "27 2,10,18 * * *"
+    - cron: "12 2,10,18 * * *"
       timezone: "Europe/Brussels"
   workflow_dispatch:
     inputs:
