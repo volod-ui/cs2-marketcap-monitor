@@ -2,9 +2,11 @@ name: CS2 Market Cap Monitor
 run-name: CS2 Market Cap — ${{ github.event_name }}
 
 on:
-  # GitHub Actions uses UTC. The Python monitor enforces 02:00, 10:00 and 18:00 Brussels time.
+  # Belgium time: 02:27, 10:27 and 18:27.
+  # Staggered after crypto and CS2 market to reduce concurrent load.
   schedule:
-    - cron: "7 * * * *"
+    - cron: "27 2,10,18 * * *"
+      timezone: "Europe/Brussels"
   workflow_dispatch:
     inputs:
       force_run:
