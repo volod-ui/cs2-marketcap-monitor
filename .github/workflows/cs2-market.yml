@@ -2,10 +2,11 @@ name: CS2 Steam Market Monitor
 run-name: CS2 Market Scan — ${{ github.event_name }}
 
 on:
-  # GitHub Actions uses UTC. We run hourly and let the Python script
-  # enforce the three Brussels report times: 02:00, 10:00, 18:00.
+  # Belgium time: 02:17, 10:17 and 18:17.
+  # Staggered 10 minutes after crypto to reduce concurrent GitHub Actions load.
   schedule:
-    - cron: "7 * * * *"
+    - cron: "17 2,10,18 * * *"
+      timezone: "Europe/Brussels"
 
   workflow_dispatch:
     inputs:
