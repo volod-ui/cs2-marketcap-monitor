@@ -2,8 +2,10 @@ name: Crypto Market Monitor
 
 on:
   schedule:
-    # Three daily report runs.
-    - cron: "0 0,8,16 * * *"
+    # Belgium time: 02:07, 10:07 and 18:07.
+    # Staggered from the CS2 monitors to reduce concurrent GitHub Actions load.
+    - cron: "7 2,10,18 * * *"
+      timezone: "Europe/Brussels"
 
   workflow_dispatch:
     inputs:
