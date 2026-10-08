@@ -32,6 +32,21 @@ DISCORD_WEBHOOK = os.environ[
     "DISCORD_WEBHOOK_CRYPTO"
 ]
 
+CMC_API_KEY = os.environ.get(
+    "COINMARKETCAP_API_KEY",
+    ""
+).strip()
+
+if not CMC_API_KEY:
+    raise RuntimeError(
+        "COINMARKETCAP_API_KEY GitHub Secret is missing."
+    )
+
+CMC_HEADERS = {
+    "Accept": "application/json",
+    "X-CMC_PRO_API_KEY": CMC_API_KEY,
+}
+
 EVENT_NAME = os.environ.get(
     "GITHUB_EVENT_NAME",
     "schedule"
@@ -89,9 +104,7 @@ def get_json(
             response = requests.get(
                 url,
                 params=params,
-                headers={
-                    "Accept": "application/json"
-                },
+                headers=CMC_HEADERS,
                 timeout=30,
             )
 
