@@ -32,19 +32,11 @@ DISCORD_WEBHOOK = os.environ[
     "DISCORD_WEBHOOK_CRYPTO"
 ]
 
-CMC_API_KEY = os.environ.get(
-    "COINMARKETCAP_API_KEY",
-    ""
-).strip()
-
-if not CMC_API_KEY:
-    raise RuntimeError(
-        "COINMARKETCAP_API_KEY GitHub Secret is missing."
-    )
-
+# Use CoinMarketCap's keyless public API.
+# This restores the original setup: no CMC account or API key
+# is required for the supported public endpoints.
 CMC_HEADERS = {
     "Accept": "application/json",
-    "X-CMC_PRO_API_KEY": CMC_API_KEY,
 }
 
 EVENT_NAME = os.environ.get(
