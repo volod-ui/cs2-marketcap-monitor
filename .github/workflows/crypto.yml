@@ -2,10 +2,9 @@ name: Crypto Market Monitor
 
 on:
   schedule:
-    # Belgium time: 02:07, 10:07 and 18:07.
-    # Staggered from the CS2 monitors to reduce concurrent GitHub Actions load.
-    - cron: "7 2,10,18 * * *"
-      timezone: "Europe/Brussels"
+    # Run hourly. The Python monitor decides whether this is a
+    # Brussels report hour (02:00, 10:00, 18:00) or a silent snapshot.
+    - cron: "7 * * * *"
 
   workflow_dispatch:
     inputs:
