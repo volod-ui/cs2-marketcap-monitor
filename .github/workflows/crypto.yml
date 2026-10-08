@@ -38,6 +38,7 @@ jobs:
       - name: Run crypto monitor
         env:
           DISCORD_WEBHOOK_CRYPTO: ${{ secrets.DISCORD_WEBHOOK_CRYPTO }}
+          COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           CRYPTO_TEST_MODE: ${{ inputs.test_mode || false }}
         run: |
