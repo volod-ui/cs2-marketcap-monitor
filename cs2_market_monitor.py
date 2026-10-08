@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 
-API_BASE_URL = "https://api-v2.openskin.dev/v1"
+API_BASE_URL = "https://api.openskin.dev/v1"
 MARKETPLACE = "steam"
 
 MIN_PRICE_USD = 2.0
