@@ -2,9 +2,9 @@ name: Crypto Market Monitor
 
 on:
   schedule:
-    # Run hourly. The Python monitor decides whether this is a
+    # Run every 2 hours. The Python monitor decides whether this is a
     # Brussels report hour (02:00, 10:00, 18:00) or a silent snapshot.
-    - cron: "7 * * * *"
+    - cron: "7 */2 * * *"
 
   workflow_dispatch:
     inputs:
