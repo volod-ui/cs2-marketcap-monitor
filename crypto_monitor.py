@@ -920,22 +920,6 @@ if report_slot is None:
 # PREVENT DUPLICATE REPORTS
 # =========================================================
 
-if state.get(
-    "last_report_slot"
-) == report_slot:
-
-    save_json(
-        STATE_FILE,
-        state,
-    )
-
-    print(
-        "This report slot was already processed."
-    )
-
-    raise SystemExit(0)
-
-
 # =========================================================
 # HISTORICAL BASELINES
 # =========================================================
