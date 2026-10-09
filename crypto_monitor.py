@@ -12,7 +12,7 @@ import requests
 # CONFIGURATION
 # =========================================================
 
-CMC_BASE = "https://pro-api.coinmarketcap.com/public-api"
+CMC_BASE = "https://pro-api.coinmarketcap.com"
 
 QUOTES_URL = (
     CMC_BASE
